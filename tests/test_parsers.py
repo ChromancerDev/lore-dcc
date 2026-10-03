@@ -37,6 +37,7 @@ Repository 0123456789abcdef0123456789abcdef
 On branch development revision 42 -> {SIG}
 """
 
+# Not yet captured on 0.9: section shape carried from Lore 0.8.6 parsers.
 STATUS_TRACKED = f"""\
 On branch main revision 7 -> {SIG}
 Remote revision 7 -> {SIG}
@@ -134,6 +135,7 @@ def test_lock_query_empty() -> None:
 
 
 def test_lock_query_records() -> None:
+    # Not yet captured on 0.9: record format taken from another Lore integration.
     text = "Locks found:\nscenes/shot v2.hip by user:abc on branch main\n"
     (record,) = parsers.parse_lock_query(text)
     assert (record.path, record.owner, record.branch) == ("scenes/shot v2.hip", "user:abc", "main")
