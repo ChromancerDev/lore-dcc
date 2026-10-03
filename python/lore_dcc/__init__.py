@@ -1,0 +1,4 @@
+"""Lore version control inside DCCs."""
+from __future__ import annotations
+
+__version__ = "0.1.0.dev0"

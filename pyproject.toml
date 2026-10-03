@@ -1,0 +1,14 @@
+[project]
+name = "lore-dcc"
+version = "0.1.0.dev0"
+description = "Lore version control inside DCCs. Houdini first."
+license = "MIT"
+requires-python = ">=3.13"
+
+[tool.pytest.ini_options]
+pythonpath = ["python"]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py313"
