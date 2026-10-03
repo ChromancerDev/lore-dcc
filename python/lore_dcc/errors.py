@@ -41,6 +41,20 @@ class LoreCommandError(LoreError):
         self.output = output
 
 
+class LockNotAcquired(LoreError):
+    """Lore exited cleanly but did not report holding every requested lock.
+
+    Attributes:
+        paths: Repo-relative paths that are not held.
+        output: Lore's output, for display.
+    """
+
+    def __init__(self, paths: list[str], output: str) -> None:
+        super().__init__(f"Could not lock {len(paths)} file(s): {', '.join(paths[:5])}")
+        self.paths = paths
+        self.output = output
+
+
 class LoreOutputError(LoreError):
     """Lore printed text the parser does not recognise.
 

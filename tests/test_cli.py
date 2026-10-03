@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 from lore_dcc.backend import cli
-from lore_dcc.errors import LoreCommandError, LoreVersionError
+from lore_dcc.errors import LockNotAcquired, LoreCommandError, LoreVersionError
 
 SIG = "9" * 64
 
@@ -45,8 +45,23 @@ def test_batches_by_count(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> No
     monkeypatch.setattr(cli, "BATCH_CHARS", 10**9)
     runner = FakeRunner()
     paths = [Path(f"f{i}.bgeo.sc") for i in range(cli.BATCH_SIZE + 1)]
-    make(tmp_path, runner).lock_acquire(paths)
-    assert [len(call) - 5 for call in runner.calls] == [cli.BATCH_SIZE, 1]
+    make(tmp_path, runner).dirty(paths)
+    assert [len(call) - 4 for call in runner.calls] == [cli.BATCH_SIZE, 1]
+
+
+def test_lock_acquire_checks_every_path(tmp_path: Path) -> None:
+    runner = FakeRunner(
+        (0, "Lock acquired on files:\nscenes/a.hip\n"),
+    )
+    make(tmp_path, runner).lock_acquire([Path("scenes/a.hip")])
+    assert runner.calls[0][3:5] == ["lock", "acquire"]
+
+
+def test_lock_acquire_missing_path_raises(tmp_path: Path) -> None:
+    runner = FakeRunner((0, "Lock acquired on files:\nscenes/a.hip\n"))
+    with pytest.raises(LockNotAcquired) as info:
+        make(tmp_path, runner).lock_acquire([Path("scenes/a.hip"), Path("scenes/b.hip")])
+    assert info.value.paths == ["scenes/b.hip"]
 
 
 def test_batches_by_length(tmp_path: Path) -> None:

@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
+from enum import Enum
 
 from lore_dcc.errors import LoreOutputError
 from lore_dcc.locks import LockRecord
@@ -19,7 +20,24 @@ _REMOTE_REVISION = re.compile(r"^Remote revision (?P<rev>\d+) -> (?P<sig>[0-9a-f
 _CHANGE = re.compile(r"^(?P<code>[MAD]) (?P<path>.+)$")
 _LOCK = re.compile(r"^(?P<path>.+) by (?P<owner>.+?) on branch (?P<branch>\S+)$")
 
-IN_SYNC_LINE = "Local branch in sync with remote"
+
+
+class RemoteState(Enum):
+    """How the local branch relates to the remote, from the `Local branch` line."""
+
+    IN_SYNC = "in_sync"
+    BEHIND = "behind"
+    DIVERGED = "diverged"
+    UNKNOWN = "unknown"
+
+
+_REMOTE_NOTES = {
+    "Local branch in sync with remote": RemoteState.IN_SYNC,
+    "Local branch is behind remote": RemoteState.BEHIND,
+    "Local branch has diverged, synchronize to merge": RemoteState.DIVERGED,
+}
+
+LOCK_HELD_HEADERS = ("Lock acquired on files:", "Lock already owned on files:")
 
 _SECTIONS = {
     "Changes staged for commit:": "staged",
@@ -68,11 +86,9 @@ class Status:
     untracked: tuple[Change, ...]
 
     @property
-    def in_sync(self) -> bool | None:
-        """True or False when Lore said so, None when it printed nothing known."""
-        if self.remote_note is None:
-            return None
-        return self.remote_note == IN_SYNC_LINE
+    def remote_state(self) -> RemoteState:
+        """The remote state, UNKNOWN when the line is missing or unfamiliar."""
+        return _REMOTE_NOTES.get(self.remote_note or "", RemoteState.UNKNOWN)
 
 
 @dataclass(frozen=True)
@@ -156,8 +172,8 @@ def parse_auth_info(text: str) -> AuthInfo:
 def parse_lock_query(text: str) -> tuple[LockRecord, ...]:
     """Parse `lore lock query` output.
 
-    The record format `<path> by <owner> on branch <branch>` is not yet
-    confirmed on Lore 0.9; see docs/design/v1-houdini.md.
+    Each record reads `<path> by <owner> on branch <branch id>`. The owner is
+    the `Name` from `lore auth info`, and the branch is an ID, not a name.
     """
     lines = [line.strip() for line in text.splitlines() if line.strip()]
     if not lines or lines[0] != "Locks found:":
@@ -169,3 +185,24 @@ def parse_lock_query(text: str) -> tuple[LockRecord, ...]:
             raise LoreOutputError(f"Unrecognised lore lock query line: {line!r}", text)
         records.append(LockRecord(match["path"].strip(), match["owner"].strip(), match["branch"]))
     return tuple(records)
+
+
+def parse_lock_acquire(text: str) -> frozenset[str]:
+    """Parse `lore lock acquire` output into the paths the caller now holds.
+
+    Paths come under `Lock acquired on files:` or `Lock already owned on
+    files:`. Any other header raises, so a refusal never reads as success.
+    """
+    held: set[str] = set()
+    in_section = False
+    for line in text.splitlines():
+        stripped = line.strip()
+        if not stripped:
+            continue
+        if stripped in LOCK_HELD_HEADERS:
+            in_section = True
+            continue
+        if stripped.endswith(":") or not in_section:
+            raise LoreOutputError(f"Unrecognised lore lock acquire line: {line!r}", text)
+        held.add(stripped)
+    return frozenset(held)

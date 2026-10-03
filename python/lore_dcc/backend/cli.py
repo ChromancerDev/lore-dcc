@@ -15,7 +15,12 @@ from dataclasses import replace
 from pathlib import Path
 
 from lore_dcc.backend import parsers
-from lore_dcc.errors import LoreCommandError, LoreNotFound, LoreVersionError
+from lore_dcc.errors import (
+    LockNotAcquired,
+    LoreCommandError,
+    LoreNotFound,
+    LoreVersionError,
+)
 from lore_dcc.locks import LockRecord
 
 logger = logging.getLogger(__name__)
@@ -109,8 +114,21 @@ class LoreCli:
         return self._run_once(["push", *([branch] if branch else [])])
 
     def lock_acquire(self, paths: Sequence[Path]) -> None:
-        """Acquire locks on files."""
-        self.run("lock", "acquire", paths=paths)
+        """Acquire locks on files, new or tracked.
+
+        Raises:
+            LockNotAcquired: Lore did not report holding every path.
+        """
+        held: set[str] = set()
+        outputs = []
+        for batch in self._batches(paths):
+            output = self._run_once(["lock", "acquire", *batch])
+            outputs.append(output)
+            held |= parsers.parse_lock_acquire(output)
+        wanted = [Path(p).relative_to(self.root).as_posix() for p in self._absolute(paths)]
+        missing = [p for p in wanted if p not in held]
+        if missing:
+            raise LockNotAcquired(missing, "\n".join(outputs))
 
     def lock_release(self, paths: Sequence[Path]) -> None:
         """Release the current user's locks on files."""
@@ -129,7 +147,7 @@ class LoreCli:
         return parsers.parse_auth_info(self._run_once(["auth", "info"]))
 
     def _absolute(self, paths: Sequence[Path]) -> list[str]:
-        return [str(Path(p) if Path(p).is_absolute() else self.root / p) for p in paths]
+        return [str((self.root / p).resolve()) for p in paths]
 
     def _batches(self, paths: Sequence[Path]) -> Iterator[list[str]]:
         batch: list[str] = []

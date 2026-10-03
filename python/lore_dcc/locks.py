@@ -29,8 +29,8 @@ class LockRecord:
 
     Attributes:
         path: Repo-relative path with forward slashes.
-        owner: The owner as Lore prints it.
-        branch: The branch the lock is held on, if printed.
+        owner: The owner as Lore prints it, which is the user's Name.
+        branch: The ID of the branch the lock is held on, if printed.
     """
 
     path: str

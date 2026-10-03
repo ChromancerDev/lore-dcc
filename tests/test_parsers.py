@@ -64,7 +64,7 @@ def test_version_rejects_unknown() -> None:
 def test_status_untracked() -> None:
     status = parsers.parse_status(STATUS_UNTRACKED)
     assert (status.branch, status.revision, status.remote_revision) == ("main", 2, 2)
-    assert status.in_sync is True
+    assert status.remote_state is parsers.RemoteState.IN_SYNC
     assert status.staged == ()
     assert [c.path for c in status.untracked] == [
         "source/test",
@@ -92,12 +92,27 @@ def test_status_tracked_sections() -> None:
 def test_status_server_down_has_no_remote() -> None:
     status = parsers.parse_status(STATUS_SERVER_DOWN)
     assert status.remote_revision is None
-    assert status.in_sync is None
+    assert status.remote_state is parsers.RemoteState.UNKNOWN
 
 
-def test_status_unknown_remote_note_is_not_in_sync() -> None:
-    text = STATUS_UNTRACKED.replace(parsers.IN_SYNC_LINE, "Local branch behind remote")
-    assert parsers.parse_status(text).in_sync is False
+@pytest.mark.parametrize(
+    ("note", "expected"),
+    [
+        ("Local branch is behind remote", parsers.RemoteState.BEHIND),
+        ("Local branch has diverged, synchronize to merge", parsers.RemoteState.DIVERGED),
+        ("Local branch is something new", parsers.RemoteState.UNKNOWN),
+    ],
+)
+def test_status_remote_state(note: str, expected: parsers.RemoteState) -> None:
+    text = f"""\
+Repository 0123456789abcdef0123456789abcdef
+On branch main revision 2 -> {SIG}
+Remote revision 3 -> {"8" * 64}
+{note}
+"""
+    status = parsers.parse_status(text)
+    assert (status.revision, status.remote_revision) == (2, 3)
+    assert status.remote_state is expected
 
 
 @pytest.mark.parametrize(
@@ -135,13 +150,44 @@ def test_lock_query_empty() -> None:
 
 
 def test_lock_query_records() -> None:
-    # Not yet captured on 0.9: record format taken from another Lore integration.
-    text = "Locks found:\nscenes/shot v2.hip by user:abc on branch main\n"
-    (record,) = parsers.parse_lock_query(text)
-    assert (record.path, record.owner, record.branch) == ("scenes/shot v2.hip", "user:abc", "main")
+    text = (
+        "Locks found:\n"
+        "README.md by artist@example.com on branch e726318bbc3fd75ac8733a7e030cc35b\n"
+        "scenes/shot v2.hip by artist@example.com on branch e726318bbc3fd75ac8733a7e030cc35b\n"
+    )
+    first, second = parsers.parse_lock_query(text)
+    assert (first.path, first.owner, first.branch) == (
+        "README.md",
+        "artist@example.com",
+        "e726318bbc3fd75ac8733a7e030cc35b",
+    )
+    assert second.path == "scenes/shot v2.hip"
 
 
 @pytest.mark.parametrize("text", ["", "No locks\n", "Locks found:\ngarbage line\n"])
 def test_lock_query_fails_closed(text: str) -> None:
     with pytest.raises(LoreOutputError):
         parsers.parse_lock_query(text)
+
+
+def test_lock_acquire_new_and_already_owned() -> None:
+    assert parsers.parse_lock_acquire("Lock acquired on files:\nsource/test/cube/Cube.hiplc\n") == {
+        "source/test/cube/Cube.hiplc"
+    }
+    assert parsers.parse_lock_acquire("Lock already owned on files:\nlore-dcc-spike/f001.txt\n") == {
+        "lore-dcc-spike/f001.txt"
+    }
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "Lock owned by someone else on files:\nREADME.md\n",
+        "README.md\n",
+        "Lock acquired on files:\nREADME.md\nSomething else:\nother.hip\n",
+    ],
+    ids=["unknown-header", "no-header", "second-unknown-header"],
+)
+def test_lock_acquire_fails_closed(text: str) -> None:
+    with pytest.raises(LoreOutputError):
+        parsers.parse_lock_acquire(text)
