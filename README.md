@@ -18,7 +18,7 @@ Each release ships one zip per DCC. The Houdini zip, `lore-dcc-houdini-<version>
 
 1. Unzip it. For a team, unzip into your Lore project, for example `<project>/tools/lore-dcc/`, and commit it to Lore so every artist gets it on their next sync. For yourself only, unzip anywhere.
 2. Point Houdini at the `houdini/` folder. Pick one:
-   - Create `$HOUDINI_USER_PREF_DIR/packages/lore_dcc_loader.json` with one line of JSON, changing the path to yours:
+   - Create `packages/lore_dcc_loader.json` inside your Houdini user folder, with one line of JSON, changing the path to yours. To find the user folder, run `hou.homeHoudiniDirectory()` in Houdini's Python Shell. On Windows it sits under `Documents` unless `HOME` is set, so a shell such as Git Bash that sets `HOME` can point Houdini at a different folder.
      ```json
      { "package_path": "D:/projects/mygame/tools/lore-dcc/houdini" }
      ```
