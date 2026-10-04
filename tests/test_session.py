@@ -1102,3 +1102,20 @@ def test_behind_skips_a_branch_that_is_not_behind(env: Env, note: str) -> None:
     env.runner.diff_out = "M a.bgeo\n"
     assert env.session.behind("scene.hip") == session_module.BehindReport(False, ())
     assert "revision diff" not in env.runner.verbs()
+
+
+def test_sync_references_makes_roots_writable_for_lore_then_read_only_again(env: Env) -> None:
+    path = env.make("a.bgeo", read_only=True)
+    env.runner.info["a.bgeo"] = "-"
+    seen = []
+    real = env.session.lore.sync_roots
+
+    def sync_roots(roots, dry_run=False):
+        if not dry_run:
+            seen.append(writable(path))
+        return real(roots, dry_run)
+
+    env.session.lore.sync_roots = sync_roots
+    env.session.sync_references(["a.bgeo"])
+    assert seen == [True]
+    assert not writable(path)

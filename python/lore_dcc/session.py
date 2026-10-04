@@ -474,8 +474,9 @@ class Session:
         """Run one scoped sync with each path as a root, skipping locally changed ones.
 
         Dry runs first: every path Lore names as locally changed is dropped
-        and the dry run repeats until it passes, then the real sync runs and
-        the read-only rule is reapplied to the synced files. A refusal that
+        and the dry run repeats until it passes. The real sync runs with the
+        roots made writable, since Lore cannot write over a read-only file,
+        and the read-only rule is reapplied afterwards. A refusal that
         names no known path raises. With nothing left to sync it returns
         without syncing.
 
@@ -495,8 +496,12 @@ class Session:
                 skipped.extend(hit)
                 roots = [r for r in roots if r not in hit]
                 continue
-            self.lore.sync_roots(roots)
-            self.refresh_read_only(roots)
+            # Lore cannot write over a read-only file, and a dry run does not notice.
+            self._set_read_only(roots, False)
+            try:
+                self.lore.sync_roots(roots)
+            finally:
+                self.refresh_read_only(roots)
             return SyncResult(tuple(roots), tuple(skipped))
         return SyncResult((), tuple(skipped))
 
