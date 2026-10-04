@@ -403,10 +403,12 @@ class Session:
             raise CommitBlocked(blocked)
         self.lore.stage([self._abs(r) for r in rels])
         wanted = {path_key(r) for r in rels}
+        wanted_dirs = {path_key(parent.as_posix()) for r in rels for parent in Path(r).parents}
+        # Unstaging a folder is recursive, so only folders holding nothing included are unstaged.
         extra = [
             c.path
             for c in self.lore.status().staged
-            if not c.is_dir and path_key(c.path) not in wanted
+            if path_key(c.path) not in (wanted_dirs if c.is_dir else wanted)
         ]
         if extra:
             self.lore.unstage([self._abs(r) for r in extra])

@@ -89,6 +89,18 @@ def test_status_tracked_sections() -> None:
     assert status.unstaged == (parsers.Change("D", "caches/old.bgeo.sc", False),)
 
 
+def test_status_check_dirty_with_no_changes() -> None:
+    text = f"""\
+Repository 0123456789abcdef0123456789abcdef
+On branch main revision 4 -> {SIG}
+Remote revision 4 -> {SIG}
+Local branch in sync with remote
+No tracked changes
+"""
+    status = parsers.parse_status(text)
+    assert (status.staged, status.unstaged, status.untracked) == ((), (), ())
+
+
 def test_status_server_down_has_no_remote() -> None:
     status = parsers.parse_status(STATUS_SERVER_DOWN)
     assert status.remote_revision is None

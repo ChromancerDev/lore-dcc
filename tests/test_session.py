@@ -496,7 +496,7 @@ def test_commit_stages_unstages_others_commits_pushes_and_releases(env: Env) -> 
         "status --check-dirty", "file info", "lock query", "lock release", "file info", "lock query",
     ]  # fmt: skip
     assert env.runner.calls("stage") == [["a.hip", "b.txt"]]
-    assert env.runner.calls("unstage") == [["extra.hip"]]
+    assert env.runner.calls("unstage") == [["extra.hip", "newdir"]]
     assert env.runner.calls("commit") == [["Fix it\n\nMore detail."]]
     assert env.runner.calls("lock release") == [["a.hip"]]
     assert (result.committed, result.pushed, result.diverged, result.push_error) == (
@@ -507,6 +507,18 @@ def test_commit_stages_unstages_others_commits_pushes_and_releases(env: Env) -> 
     assert env.session.touched == {"other.hip"}
     assert env.session.outputs == set()
     assert not writable(mine)
+
+
+def test_commit_unstages_only_folders_without_included_files(env: Env) -> None:
+    env.make("scenes/new/a.hip")
+    env.runner.info = {"scenes/new/a.hip": "Added"}
+    env.runner.status_out = (
+        HEAD
+        + "Changes staged for commit:\nA scenes/ \nA scenes/new/ \nA scenes/new/a.hip \n"
+        + "A caches/ \nA caches/b.bgeo.sc \n"
+    )
+    env.session.commit(["scenes/new/a.hip"], "Add a", push=False)
+    assert env.runner.calls("unstage") == [["caches", "caches/b.bgeo.sc"]]
 
 
 def test_commit_summary_only_message(env: Env) -> None:

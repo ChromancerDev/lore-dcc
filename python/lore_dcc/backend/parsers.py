@@ -42,7 +42,9 @@ FILE_INFO_KEYS = ("Path", "Type", "Size", "Mode", "Context", "Hash", "Status")
 FILE_STATUS_TRACKED = frozenset({"-", "Modified", "Deleted"})
 FILE_STATUS_VALUES = FILE_STATUS_TRACKED | {"Added"}
 
-LOCK_HELD_HEADERS = ("Lock acquired on files:", "Lock already owned on files:")
+NO_CHANGES_LINE = "No tracked changes"
+
+LOCK_HELD_HEADERS =("Lock acquired on files:", "Lock already owned on files:")
 
 _SECTIONS = {
     "Changes staged for commit:": "staged",
@@ -186,6 +188,8 @@ def parse_status(text: str) -> Status:
             section = _SECTIONS[stripped]
             continue
         if stripped == "Tracked changes:" and section is not None:
+            continue
+        if stripped == NO_CHANGES_LINE:
             continue
         match = _CHANGE.match(stripped)
         if match and section is not None:
