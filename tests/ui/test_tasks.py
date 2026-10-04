@@ -1,4 +1,4 @@
-"""run_blocking: worker thread, event pumping, busy dialog, exceptions."""
+"""run_blocking and run_in_background: worker thread, event pumping, busy dialog, exceptions."""
 
 from __future__ import annotations
 
@@ -95,3 +95,59 @@ def test_event_loop_excludes_user_input(qapp, monkeypatch) -> None:
     monkeypatch.setattr(QtCore, "QEventLoop", RecordingLoop)
     assert tasks.run_blocking(lambda: 1) == 1
     assert flags == [(real.ProcessEventsFlag.ExcludeUserInputEvents,)]
+
+
+def _wait_for(qapp, done: list) -> None:
+    deadline = time.monotonic() + 5
+    while not done and time.monotonic() < deadline:
+        qapp.processEvents()
+        time.sleep(0.01)
+
+
+def test_background_returns_at_once_and_delivers_on_the_ui_thread(qapp) -> None:
+    got = []
+    started = time.monotonic()
+    tasks.run_in_background(
+        lambda a: (time.sleep(0.3), a * 2, threading.get_ident())[1:],
+        4,
+        on_done=lambda result, error: got.append((result, error, threading.get_ident())),
+    )
+    assert time.monotonic() - started < 0.2
+    assert got == []
+    _wait_for(qapp, got)
+    (result, error, delivered_on), = got
+    assert (result[0], error) == (8, None)
+    assert result[1] != threading.get_ident()
+    assert delivered_on == threading.get_ident()
+
+
+def test_background_delivers_an_error_and_releases_the_notifier(qapp) -> None:
+    got = []
+
+    def boom() -> None:
+        raise ValueError("nope")
+
+    tasks.run_in_background(boom, on_done=lambda result, error: got.append((result, error)))
+    assert len(tasks._pending) == 1
+    _wait_for(qapp, got)
+    assert got[0][0] is None and isinstance(got[0][1], ValueError)
+    assert tasks._pending == set()
+
+
+def test_background_runs_inline_without_application(monkeypatch) -> None:
+    monkeypatch.setattr(QtWidgets.QApplication, "instance", staticmethod(lambda: None))
+    got = []
+    tasks.run_in_background(lambda: 3, on_done=lambda result, error: got.append((result, error)))
+    tasks.run_in_background(
+        lambda: 1 / 0, on_done=lambda result, error: got.append((result, type(error)))
+    )
+    assert got == [(3, None), (None, ZeroDivisionError)]
+
+
+def test_background_waits_for_a_running_blocking_call(qapp) -> None:
+    got = []
+    tasks.run_in_background(lambda: 1, on_done=lambda result, error: got.append(result))
+    tasks.run_blocking(time.sleep, 0.3)
+    assert got == []
+    _wait_for(qapp, got)
+    assert got == [1]

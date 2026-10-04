@@ -13,6 +13,7 @@ import os
 import shutil
 import sys
 import tempfile
+import time
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -65,7 +66,7 @@ check("lore_dcc.houdini.hooks" in sys.modules, "ready.py imported lore_dcc.houdi
 from lore_dcc import prefs
 from lore_dcc import session as session_module
 from lore_dcc.errors import NotAWorkingCopy
-from lore_dcc.houdini import actions, api, hooks, host, outputs
+from lore_dcc.houdini import actions, api, hooks, host, outputs, references
 from lore_dcc.locks import LockState
 from lore_dcc.session import FileState, WriteResult
 
@@ -334,6 +335,47 @@ except RuntimeError:
     check(True, "pre_render raises without a UI so the render stops")
 else:
     check(False, "pre_render raises without a UI so the render stops")
+
+# 7. Reference scan and reload.
+sops = hou.node("/obj/geo1")
+inner = sops.createNode("file", "ref_inside")
+inner.parm("file").set("$HIP/refs/in.bgeo")
+foreign = outside / "ext.bgeo"
+foreign.write_bytes(b"x")
+stranger = sops.createNode("file", "ref_outside")
+stranger.parm("file").set(str(foreign))
+gone = sops.createNode("file", "ref_outside_missing")
+gone.parm("file").set(str(outside / "gone.bgeo"))
+scene = references.scan(work)
+check(work / "refs" / "in.bgeo" in scene.inside, "scan: a File SOP inside the working copy is a reference")
+check(
+    (stranger.parm("file").path(), str(foreign)) in scene.outside,
+    "scan: an existing file outside the working copy is reported with its parm path",
+)
+check(
+    not any("gone.bgeo" in file for _where, file in scene.outside),
+    "scan: a missing file outside the working copy is dropped",
+)
+check(work / "probe.hda" in scene.inside, "scan: the HDA library file the scene uses is a reference")
+
+changing = work / "changing.bgeo"
+
+
+def write_points(count: int) -> None:
+    geometry = hou.Geometry()
+    for _ in range(count):
+        geometry.createPoint()
+    geometry.saveToFile(str(changing))
+
+
+write_points(1)
+reader = sops.createNode("file", "ref_reload")
+reader.parm("file").set(str(changing))
+check(len(reader.geometry().points()) == 1, "reload: File SOP reads the first file")
+time.sleep(1.5)
+write_points(3)
+references.reload([changing, work / "probe.hda"])
+check(len(reader.geometry().points()) == 3, "reload: File SOP reads the rewritten file")
 
 shutil.rmtree(work, ignore_errors=True)
 shutil.rmtree(outside, ignore_errors=True)

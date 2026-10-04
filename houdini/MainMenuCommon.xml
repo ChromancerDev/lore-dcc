@@ -25,6 +25,11 @@
         <scriptCode><![CDATA[from lore_dcc.houdini import actions; actions.collect_outputs()]]></scriptCode>
       </scriptItem>
 
+      <scriptItem id="lore_menu_sync_dependencies">
+        <label>Sync Dependencies</label>
+        <scriptCode><![CDATA[from lore_dcc.houdini import actions; actions.sync_dependencies()]]></scriptCode>
+      </scriptItem>
+
       <scriptItem id="lore_menu_commit">
         <label>Commit</label>
         <scriptCode><![CDATA[from lore_dcc.houdini import actions; actions.commit()]]></scriptCode>

@@ -205,3 +205,49 @@ def test_revision_status_asks_for_revision_only_and_parses_the_remote(tmp_path: 
     status = make(tmp_path, runner).revision_status()
     assert runner.calls == [["lore", "-P", "--non-interactive", "status", "--revision-only"]]
     assert (status.revision, status.remote_revision) == (3, 5)
+
+
+def test_dependency_add_and_remove_pass_one_tag_value_then_absolute_paths(tmp_path: Path) -> None:
+    runner = FakeRunner()
+    lore = make(tmp_path, runner)
+    lore.dependency_add(Path("s.hip"), [Path("geo/a.bgeo")])
+    lore.dependency_remove(Path("s.hip"), [Path("geo/b.bgeo")])
+    lore.dependency_add(Path("s.hip"), [])
+    root = tmp_path.resolve()
+    head = ["lore", "-P", "--non-interactive", "file", "dependency"]
+    assert runner.calls == [
+        [*head, "add", "--tag=houdini", str(root / "s.hip"), str(root / "geo/a.bgeo")],
+        [*head, "remove", "--tag=houdini", str(root / "s.hip"), str(root / "geo/b.bgeo")],
+    ]
+
+
+def test_dependency_list_parses_the_edges(tmp_path: Path) -> None:
+    out = f"{tmp_path}/s.hip:\n  geo/a.bgeo [houdini]\n"
+    assert make(tmp_path, FakeRunner((0, out))).dependency_list(Path("s.hip")) == ("geo/a.bgeo",)
+
+
+def test_revision_diff_passes_signatures(tmp_path: Path) -> None:
+    runner = FakeRunner((0, "M geo/a.bgeo\n"))
+    changes = make(tmp_path, runner).revision_diff("a" * 64, "b" * 64)
+    assert runner.calls[0][3:] == ["revision", "diff", "a" * 64, "--target", "b" * 64]
+    assert [(c.code, c.path) for c in changes] == [("M", "geo/a.bgeo")]
+
+
+def test_sync_roots_passes_relative_roots_in_one_call(tmp_path: Path) -> None:
+    runner = FakeRunner()
+    make(tmp_path, runner).sync_roots(["geo/a.bgeo", "tex/b.exr"], dry_run=True)
+    assert runner.calls == [
+        [
+            "lore", "-P", "--non-interactive", "sync",
+            "--root-file", "geo/a.bgeo", "--root-file", "tex/b.exr", "--dependency-tag", cli.ROOTS_ONLY_TAG, "--dry-run",
+        ]
+    ]  # fmt: skip
+    assert runner.kwargs[0]["timeout"] == cli.SYNC_TIMEOUT
+
+
+def test_sync_roots_refuses_empty_and_oversized(tmp_path: Path) -> None:
+    lore = make(tmp_path, FakeRunner())
+    with pytest.raises(ValueError):
+        lore.sync_roots([])
+    with pytest.raises(ValueError):
+        lore.sync_roots(["x" * 100] * 1000)

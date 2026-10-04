@@ -15,7 +15,7 @@ from typing import Any
 import hou
 
 from lore_dcc.errors import LoreError, NotAWorkingCopy
-from lore_dcc.houdini import host
+from lore_dcc.houdini import host, references
 from lore_dcc.locks import LockState
 from lore_dcc.session import FileState, Session
 
@@ -63,7 +63,7 @@ def _on_hip_event(event_type: Any) -> None:
 
 def _on_asset_event(event_type: Any, asset_definition: Any = None, **_kwargs: Any) -> None:
     try:
-        file = library_file(asset_definition)
+        file = references.library_file(asset_definition)
         if file is None:
             return
         if event_type == hou.hdaEventType.BeforeAssetSaved:
@@ -76,14 +76,6 @@ def _on_asset_event(event_type: Any, asset_definition: Any = None, **_kwargs: An
 
 setattr(_on_hip_event, _TAG, True)
 setattr(_on_asset_event, _TAG, True)
-
-
-def library_file(definition: Any) -> str | None:
-    """Return an HDA definition's library file, or None when it lives inside the hip."""
-    if definition is None:
-        return None
-    file = definition.libraryFilePath()
-    return file if file and file != "Embedded" and os.path.isabs(file) else None
 
 
 def before_save(file: str) -> None:
@@ -127,17 +119,71 @@ def after_save(file: str) -> None:
         default="Stage",
     )
     if choice == "Stage":
+        if _file_key(file) == _file_key(hou.hipFile.path()):
+            _remember_references(session, file, warn=True)
         _guarded(session.stage, [file], context=f"Staging {Path(file).name}")
 
 
 def after_load(file: str) -> None:
-    """Apply the read-only rule to a freshly loaded file. Never prompts."""
+    """Apply the read-only rule to a freshly loaded file, then check its references.
+
+    The server check runs in the background and asks only when something is behind.
+    """
     if not host.load_prefs().enabled:
         return
     session = _session(file)
-    if session is not None:
-        session.invalidate()
-        host.run(session.refresh_read_only, [file])
+    if session is None:
+        return
+    session.invalidate()
+    host.run(session.refresh_read_only, [file])
+    if host.has_ui():
+        from lore_dcc.ui import tasks
+
+        _remember_references(session, file, warn=False)
+        tasks.run_in_background(
+            session.behind, file, on_done=lambda report, error: _offer_sync(file, report, error)
+        )
+
+
+def _remember_references(session: Session, file: str, *, warn: bool) -> None:
+    try:
+        scene = references.scan(session.workspace.root)
+        session.set_references(file, scene.inside)
+        if warn:
+            from lore_dcc.houdini import actions
+
+            actions.warn_outside(scene)
+    except Exception:
+        logger.exception("Lore could not read the references of %s", file)
+
+
+def _offer_sync(file: str, report: Any, error: BaseException | None) -> None:
+    try:
+        if error is not None:
+            logger.warning("Could not check %s against the server: %s", file, error)
+            return
+        if _file_key(hou.hipFile.path()) != _file_key(file):
+            return
+        if not (report.behind or report.source_behind):
+            return
+        from lore_dcc.houdini import actions
+
+        parts = []
+        if report.source_behind:
+            parts.append("This scene itself is behind the server.")
+        if report.behind:
+            listed = actions.list_paths(report.behind)
+            parts.append(f"These references are behind the server:\n{listed}")
+        choice = host.ask(
+            "Lore - Dependencies Behind Server",
+            "\n\n".join(parts),
+            ["Sync Dependencies", "Not now"],
+            default="Sync Dependencies",
+        )
+        if choice == "Sync Dependencies":
+            actions.sync_dependencies(confirm=False)
+    except Exception:
+        logger.exception("Lore dependency check failed for %s", file)
 
 
 def _session(file: str) -> Session | None:

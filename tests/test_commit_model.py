@@ -84,6 +84,49 @@ def test_group_order_is_fixed_regardless_of_status_order() -> None:
     ]
 
 
+def new(path: str) -> FileState:
+    return FileState(path, True, False, True, LockState.NOT_LOCKED, None)
+
+
+def test_dependencies_group_sits_between_outputs_and_other_changes() -> None:
+    assert cm.GROUPS == (
+        cm.GROUP_SESSION,
+        cm.GROUP_OUTPUTS,
+        cm.GROUP_DEPENDENCIES,
+        cm.GROUP_OTHER,
+        cm.GROUP_BLOCKED,
+    )
+
+
+def test_untracked_reference_goes_to_dependencies_checked() -> None:
+    status = make_status(untracked=[change("A", "ref.bgeo"), change("A", "other.txt")])
+    rows = cm.build_rows(status, [new("ref.bgeo")], set(), set(), references=["ref.bgeo"])
+    assert [(r.path, r.group, r.checked) for r in rows] == [
+        ("ref.bgeo", cm.GROUP_DEPENDENCIES, True),
+        ("other.txt", cm.GROUP_OTHER, False),
+    ]
+
+
+def test_tracked_reference_stays_in_other_changes() -> None:
+    status = make_status(unstaged=[change("M", "ref.bgeo")])
+    rows = cm.build_rows(status, [fs("ref.bgeo")], set(), set(), references=["ref.bgeo"])
+    assert [(r.group, r.checked) for r in rows] == [(cm.GROUP_OTHER, False)]
+
+
+def test_session_and_outputs_win_over_dependencies() -> None:
+    status = make_status(untracked=[change("A", "t.bgeo"), change("A", "o.bgeo")])
+    states = [new("t.bgeo"), new("o.bgeo")]
+    rows = cm.build_rows(status, states, {"t.bgeo"}, {"o.bgeo"}, references=["t.bgeo", "o.bgeo"])
+    assert [r.group for r in rows] == [cm.GROUP_SESSION, cm.GROUP_OUTPUTS]
+
+
+def test_blocked_reference_goes_to_cannot_commit() -> None:
+    status = make_status(untracked=[change("A", "ref.bgeo")])
+    blocked = FileState("ref.bgeo", True, False, True, LockState.LOCKED_BY_OTHER, "Ann")
+    rows = cm.build_rows(status, [blocked], set(), set(), references=["ref.bgeo"])
+    assert [r.group for r in rows] == [cm.GROUP_BLOCKED]
+
+
 def test_blocked_by_other_goes_only_to_cannot_commit() -> None:
     status = make_status(unstaged=[change("M", "a.hip")])
     states = [fs("a.hip", LockState.LOCKED_BY_OTHER, "Ann")]
@@ -162,6 +205,7 @@ class FakeSource:
         self._states = states
         self.touched = {"a.hip"}
         self.outputs: set[str] = set()
+        self.references: dict[str, tuple[str, ...]] = {}
         self.queried: list[list[str]] = []
 
     def status(self) -> Status:
@@ -186,6 +230,35 @@ def test_load_rows_skips_file_query_when_clean() -> None:
     source = FakeSource(make_status(), [])
     _, rows = cm.load_rows(source)
     assert rows == [] and source.queried == []
+
+
+def test_load_rows_adds_an_untracked_reference_status_does_not_list() -> None:
+    source = FakeSource(make_status(unstaged=[change("M", "a.hip")]), [fs("a.hip"), new("ref.bgeo")])
+    source.references = {"a.hip": ("ref.bgeo",)}
+    status, rows = cm.load_rows(source)
+    assert source.queried == [["a.hip", "ref.bgeo"]]
+    assert status.untracked == ()
+    assert [(r.path, r.code, r.group, r.checked) for r in rows] == [
+        ("a.hip", "M", cm.GROUP_SESSION, True),
+        ("ref.bgeo", "A", cm.GROUP_DEPENDENCIES, True),
+    ]
+
+
+def test_load_rows_does_not_duplicate_a_reference_status_lists() -> None:
+    status = make_status(untracked=[change("A", "ref.bgeo")])
+    source = FakeSource(status, [new("ref.bgeo")])
+    source.references = {"a.hip": ("ref.bgeo",), "b.hip": ("ref.bgeo",)}
+    _, rows = cm.load_rows(source)
+    assert source.queried == [["ref.bgeo"]]
+    assert [r.path for r in rows] == ["ref.bgeo"]
+
+
+def test_load_rows_skips_references_missing_from_disk_or_tracked() -> None:
+    gone = FileState("gone.bgeo", False, False, True, LockState.NOT_LOCKED, None)
+    source = FakeSource(make_status(), [gone, fs("tracked.bgeo")])
+    source.references = {"a.hip": ("gone.bgeo", "tracked.bgeo")}
+    _, rows = cm.load_rows(source)
+    assert rows == []
 
 
 def test_remote_state_text() -> None:

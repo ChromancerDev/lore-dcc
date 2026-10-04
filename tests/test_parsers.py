@@ -373,3 +373,69 @@ def test_pushed_revision_takes_the_last_of_several() -> None:
 @pytest.mark.parametrize("text", ["", "Pushed 1 fragment(s)\n", "Pushed revision 3 to branch main\n"])
 def test_pushed_revision_is_none_when_the_line_is_missing_or_odd(text: str) -> None:
     assert parsers.pushed_revision(text) is None
+
+
+DEPENDENCY_LIST = """\
+D:/lore-spike/a/ldspike/scene.hip:
+  ldspike/geo/rock.bgeo [houdini]
+  ldspike/tex/rock.exr [houdini, other]
+"""
+
+
+def test_dependency_list_returns_repo_relative_paths() -> None:
+    assert parsers.parse_dependency_list(DEPENDENCY_LIST) == (
+        "ldspike/geo/rock.bgeo",
+        "ldspike/tex/rock.exr",
+    )
+    assert parsers.parse_dependency_list("D:/w/scene.hip:\n") == ()
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "",
+        "  ldspike/geo/rock.bgeo [houdini]\n",
+        DEPENDENCY_LIST + "D:/w/other.hip:\n",
+        DEPENDENCY_LIST.replace(" [houdini]", ""),
+        "[Error] file not found: D:/w/scene.hip\n",
+    ],
+)
+def test_dependency_list_fails_closed(text: str) -> None:
+    with pytest.raises(LoreOutputError):
+        parsers.parse_dependency_list(text)
+
+
+def test_revision_diff_lines() -> None:
+    changes = parsers.parse_revision_diff("M ldspike/geo/rock.bgeo\nA ldspike/new/\n")
+    assert changes == (
+        parsers.Change("M", "ldspike/geo/rock.bgeo", False),
+        parsers.Change("A", "ldspike/new", True),
+    )
+    assert parsers.parse_revision_diff("") == ()
+    with pytest.raises(LoreOutputError):
+        parsers.parse_revision_diff("M ldspike/a\nRenamed ldspike/b\n")
+
+
+SYNC_BLOCKED = r"""
+Sync from remote lore://100.78.241.36:41337
+On branch main revision 8 -> b519696064c1f16e8da138169adeb0ca059bc6d7b800b75c6d9f84276cfd8812
+Synchronizing to revision 9 -> af884b2507f3e39ac48b0980ea713b4a3f5a9d5d43012e46b6fd1265d6dc965a
+Calculating deltas 8 -> 9
+Dependency filter: 2 of 2 changes in inclusion set
+Verifying 2 changes with local file system
+[Error] File has local changes: ldspike/tex/rock.exr (incoming size 7 bytes, file system size 20 bytes)
+[Error] Local modifications prevent synchronization
+  at lore-revision\src\fs\realize.rs:468:47
+"""
+
+
+def test_sync_blocked_names_locally_changed_files() -> None:
+    assert parsers.parse_sync_blocked(SYNC_BLOCKED) == ("ldspike/tex/rock.exr",)
+    assert parsers.parse_sync_blocked("[Error] file not found: x\n") == ()
+
+
+def test_status_keeps_both_signatures() -> None:
+    status = parsers.parse_status(
+        f"On branch main revision 8 -> {'a' * 64}\nRemote revision 9 -> {'b' * 64}\n"
+    )
+    assert (status.signature, status.remote_signature) == ("a" * 64, "b" * 64)

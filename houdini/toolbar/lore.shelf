@@ -6,6 +6,7 @@
     <memberTool name="lore_lock"/>
     <memberTool name="lore_discard"/>
     <memberTool name="lore_collect_outputs"/>
+    <memberTool name="lore_sync_dependencies"/>
     <memberTool name="lore_commit"/>
   </toolshelf>
 
@@ -37,6 +38,12 @@ actions.discard()]]></script>
     <helpText><![CDATA[Find the files this scene writes, stage new ones, keep locks on changed ones and release unchanged ones. Perforce: checkout dependencies.]]></helpText>
     <script scriptType="python"><![CDATA[from lore_dcc.houdini import actions
 actions.collect_outputs()]]></script>
+  </tool>
+
+  <tool name="lore_sync_dependencies" label="Sync Dependencies" icon="BUTTONS_reload">
+    <helpText><![CDATA[Sync the files this scene reads that are newer on the server, without touching the open scene. Perforce: get latest on the files this scene uses.]]></helpText>
+    <script scriptType="python"><![CDATA[from lore_dcc.houdini import actions
+actions.sync_dependencies()]]></script>
   </tool>
 
   <tool name="lore_commit" label="Commit" icon="BUTTONS_upload">

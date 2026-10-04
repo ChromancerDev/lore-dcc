@@ -81,6 +81,7 @@ class FakeSession:
         self._states = list(states) or [state("b.hip", LockState.LOCKED_BY_OTHER, "Ann")]
         self.touched = {"s1.hip", "s2.hip"}
         self.outputs = {"o.bgeo"}
+        self.references: dict[str, tuple[str, ...]] = {}
         self.workspace = SimpleNamespace(root=Path("/work/repo"), remote_url="lore://host/repo")
         self.lore = FakeLore(fail_auth)
         self.commit_result = commit_result or outcome()

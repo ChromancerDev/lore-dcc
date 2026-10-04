@@ -37,6 +37,58 @@ class _BusyDialog(QtWidgets.QProgressDialog):
 
 class _Notifier(QtCore.QObject):
     finished = QtCore.Signal()
+    done = QtCore.Signal(object, object)
+
+
+_pending: set[_Notifier] = set()
+_busy = 0
+_RETRY_MS = 500
+
+
+def run_in_background[T](
+    fn: Callable[..., T],
+    *args: object,
+    on_done: Callable[[T | None, BaseException | None], None],
+) -> None:
+    """Run `fn(*args)` on a worker thread and return at once.
+
+    `on_done(result, None)` or `on_done(None, error)` runs later on the
+    thread that owns the QApplication, once no run_blocking call and no modal
+    dialog is open, so it never lands inside another Lore call or a host
+    callback. No dialog shows and user input is not blocked. `fn` must not touch DCC APIs. Without a QApplication, `fn` and
+    `on_done` run inline.
+    """
+    app = QtWidgets.QApplication.instance()
+    if not isinstance(app, QtWidgets.QApplication):
+        try:
+            result = fn(*args)
+        except BaseException as exc:  # noqa: BLE001 - handed to on_done
+            on_done(None, exc)
+        else:
+            on_done(result, None)
+        return
+
+    notifier = _Notifier()
+    _pending.add(notifier)
+
+    def deliver(result: T | None, error: BaseException | None) -> None:
+        if _busy or QtWidgets.QApplication.activeModalWidget() is not None:
+            QtCore.QTimer.singleShot(_RETRY_MS, lambda: deliver(result, error))
+            return
+        _pending.discard(notifier)
+        notifier.deleteLater()
+        on_done(result, error)
+
+    notifier.done.connect(deliver, QtCore.Qt.ConnectionType.QueuedConnection)
+
+    def work() -> None:
+        try:
+            outcome = (fn(*args), None)
+        except BaseException as exc:  # noqa: BLE001 - handed to on_done
+            outcome = (None, exc)
+        notifier.done.emit(*outcome)
+
+    threading.Thread(target=work, name="lore-dcc-task", daemon=True).start()
 
 
 def run_blocking[T](
@@ -80,10 +132,13 @@ def run_blocking[T](
     timer.timeout.connect(show_busy)
     thread = threading.Thread(target=work, name="lore-dcc-task", daemon=True)
     timer.start(_SHOW_AFTER_MS)
+    global _busy
     thread.start()
+    _busy += 1
     try:
         loop.exec(QtCore.QEventLoop.ProcessEventsFlag.ExcludeUserInputEvents)
     finally:
+        _busy -= 1
         timer.stop()
         for dialog in busy:
             dialog.hide()

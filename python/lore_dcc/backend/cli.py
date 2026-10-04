@@ -30,6 +30,8 @@ TESTED_VERSION = (0, 9, 0)
 BATCH_SIZE = 500
 BATCH_CHARS = 24_000
 DEFAULT_TIMEOUT = 120.0
+SYNC_TIMEOUT = 3600.0
+ROOTS_ONLY_TAG = "lore-dcc-roots-only"
 
 Runner = Callable[..., subprocess.CompletedProcess]
 
@@ -166,6 +168,70 @@ class LoreCli:
             infos.update(parsers.parse_file_info(self._run_once(["file", "info", *batch])))
         return infos
 
+    def dependency_list(self, source: Path) -> tuple[str, ...]:
+        """Return the repo-relative paths `source` links to with the `houdini` tag.
+
+        Raises:
+            LoreCommandError: Lore failed, e.g. `source` is neither tracked nor staged.
+        """
+        return parsers.parse_dependency_list(
+            self._run_once(["file", "dependency", "list", "--tag=houdini", self._one(source)])
+        )
+
+    def dependency_add(self, source: Path, deps: Sequence[Path]) -> None:
+        """Link `source` to `deps` with the `houdini` tag. All or nothing in Lore.
+
+        Both ends must be tracked or staged. Does nothing when `deps` is empty.
+        """
+        if deps:
+            self.run("file", "dependency", "add", "--tag=houdini", self._one(source), paths=deps)
+
+    def dependency_remove(self, source: Path, deps: Sequence[Path]) -> None:
+        """Drop the `houdini` tag from links `source` -> `deps`. Missing links are fine.
+
+        Does nothing when `deps` is empty.
+        """
+        if deps:
+            self.run("file", "dependency", "remove", "--tag=houdini", self._one(source), paths=deps)
+
+    def revision_diff(self, source: str, target: str) -> tuple[parsers.Change, ...]:
+        """Return the paths that changed between two revision signatures.
+
+        Signatures only: Lore answers an unsynced revision number with a zero
+        block and exit 0.
+        """
+        return parsers.parse_revision_diff(
+            self._run_once(["revision", "diff", source, "--target", target])
+        )
+
+    def sync_roots(self, roots: Sequence[str], dry_run: bool = False) -> str:
+        """Run one scoped `lore sync`, each repo-relative path in `roots` its own `--root-file`.
+
+        `--root-file` is the one argument Lore needs repo-relative: an
+        absolute path fails. It runs as a single call, because the first
+        scoped sync moves the branch to the remote revision and a second call
+        would find nothing to sync. A bare `--root-file` also pulls in the
+        root's linked files, so `--dependency-tag` names a tag no link carries
+        and the sync covers the roots alone.
+
+        Raises:
+            ValueError: `roots` is empty, or longer than one command line holds.
+            LoreCommandError: The sync failed; exit 39 means local changes
+                blocked it, see `parsers.parse_sync_blocked`.
+        """
+        if not roots:
+            raise ValueError("No root files to sync.")
+        args = [arg for root in roots for arg in ("--root-file", root)]
+        if sum(len(arg) + 3 for arg in args) > BATCH_CHARS:
+            raise ValueError(f"{len(roots)} root files are too many for one lore sync call.")
+        dry = ["--dry-run"] if dry_run else []
+        return self._run_once(
+            ["sync", *args, "--dependency-tag", ROOTS_ONLY_TAG, *dry], timeout=SYNC_TIMEOUT
+        )
+
+    def _one(self, path: Path) -> str:
+        return str((self.root / path).resolve())
+
     def _absolute(self, paths: Sequence[Path]) -> list[str]:
         return [str((self.root / p).resolve()) for p in paths]
 
@@ -193,7 +259,10 @@ class LoreCli:
             untracked=tuple(c for r in results for c in r.untracked),
         )
 
-    def _run_once(self, args: list[str], global_flags: bool = True) -> str:
+    def _run_once(
+        self, args: list[str], global_flags: bool = True, timeout: float | None = None
+    ) -> str:
+        timeout = timeout or self.timeout
         argv = [self.executable, *(["-P", "--non-interactive"] if global_flags else []), *args]
         kwargs: dict = {}
         if sys.platform == "win32":
@@ -206,14 +275,14 @@ class LoreCli:
                 text=True,
                 encoding="utf-8",
                 errors="replace",
-                timeout=self.timeout,
+                timeout=timeout,
                 stdin=subprocess.DEVNULL,
                 **kwargs,
             )
         except subprocess.TimeoutExpired as exc:
             output = _text(exc.stdout) + _text(exc.stderr)
             raise LoreCommandError(
-                f"lore {' '.join(args[:2])} ran past {self.timeout:.0f} s", argv, None, output
+                f"lore {' '.join(args[:2])} ran past {timeout:.0f} s", argv, None, output
             ) from exc
         if result.returncode != 0:
             output = (result.stdout or "") + (result.stderr or "")

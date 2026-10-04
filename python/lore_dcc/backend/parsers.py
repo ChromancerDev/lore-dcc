@@ -24,6 +24,8 @@ _COMMITTED_REVISION = re.compile(r"^Revision\s*:\s*(?P<rev>\d+)$")
 _PUSHED_REVISION = re.compile(
     r"^Pushed revision (?P<rev>\d+) -> (?P<sig>[0-9a-f]+) to branch (?P<branch>\S+)$"
 )
+_DEPENDENCY = re.compile(r"^  (?P<path>\S.*?) \[(?P<tags>[^\]]*)\]$")
+_SYNC_BLOCKED = re.compile(r"^\[Error\] File has local changes: (?P<path>.+?) \(incoming size .*\)$")
 BRANCH_INFO_KEYS = ("ID", "Latest", "Remote Latest", "Creator", "Created")
 
 
@@ -49,7 +51,7 @@ _LINK_SIZE = re.compile(r"^(dependencies|dependents):\s+<\d+ bytes>$")
 
 NO_CHANGES_LINE = "No tracked changes"
 
-LOCK_HELD_HEADERS =("Lock acquired on files:", "Lock already owned on files:")
+LOCK_HELD_HEADERS = ("Lock acquired on files:", "Lock already owned on files:")
 
 _SECTIONS = {
     "Changes staged for commit:": "staged",
@@ -87,6 +89,9 @@ class Status:
         staged: Changes staged for commit.
         unstaged: Tracked changes not staged.
         untracked: Files Lore does not track yet.
+        signature: The local revision signature from the `On branch` line.
+        remote_signature: The remote revision signature, or None with the
+            remote line missing.
     """
 
     branch: str
@@ -96,6 +101,8 @@ class Status:
     staged: tuple[Change, ...]
     unstaged: tuple[Change, ...]
     untracked: tuple[Change, ...]
+    signature: str | None = None
+    remote_signature: str | None = None
 
     @property
     def remote_state(self) -> RemoteState:
@@ -178,6 +185,53 @@ def pushed_revision(text: str) -> PushedRevision | None:
     return found
 
 
+def parse_revision_diff(text: str) -> tuple[Change, ...]:
+    """Parse `lore revision diff <sig> --target <sig>`: one `M|A|D <path>` line per change.
+
+    Blank output means no change. Any other line raises.
+    """
+    changes = []
+    for line in text.splitlines():
+        if not line.strip():
+            continue
+        match = _CHANGE.match(line.strip())
+        if not match:
+            raise LoreOutputError(f"Unrecognised lore revision diff line: {line!r}", text)
+        path = match["path"].strip()
+        changes.append(Change(match["code"], path.rstrip("/"), path.endswith("/")))
+    return tuple(changes)
+
+
+def parse_dependency_list(text: str) -> tuple[str, ...]:
+    """Parse `lore file dependency list <one path> --tag houdini`.
+
+    Output is a `<path as passed>:` header and then one `  <repo-relative dep>
+    [<tags>]` line per edge. Returns the repo-relative dependency paths. A
+    missing header, a second header or any other line raises.
+    """
+    lines = [line for line in text.splitlines() if line.strip()]
+    if not lines or lines[0].startswith(" ") or not lines[0].endswith(":"):
+        raise LoreOutputError("lore file dependency list did not start with '<path>:'", text)
+    deps = []
+    for line in lines[1:]:
+        match = _DEPENDENCY.match(line)
+        if not match:
+            raise LoreOutputError(f"Unrecognised lore file dependency list line: {line!r}", text)
+        deps.append(match["path"])
+    return tuple(deps)
+
+
+def parse_sync_blocked(text: str) -> tuple[str, ...]:
+    """Return the repo-relative paths a refused `lore sync` names as locally changed.
+
+    Reads `[Error] File has local changes: <path> (incoming size ...)` lines.
+    Returns an empty tuple when there are none; the caller decides whether
+    that is an error.
+    """
+    found = (_SYNC_BLOCKED.match(line.strip()) for line in text.splitlines())
+    return tuple(dict.fromkeys(match["path"] for match in found if match))
+
+
 def parse_version(text: str) -> tuple[int, int, int]:
     """Parse `lore --version`, e.g. `lore 0.9.0+783`."""
     match = _VERSION.match(text.strip())
@@ -192,6 +246,8 @@ def parse_status(text: str) -> Status:
     revision = 0
     remote_revision: int | None = None
     remote_note: str | None = None
+    signature: str | None = None
+    remote_signature: str | None = None
     section: str | None = None
     sections: dict[str, list[Change]] = {"staged": [], "unstaged": [], "untracked": []}
     for line in text.splitlines():
@@ -199,10 +255,10 @@ def parse_status(text: str) -> Status:
         if not stripped or _REPOSITORY.match(stripped):
             continue
         if match := _ON_BRANCH.match(stripped):
-            branch, revision = match["branch"], int(match["rev"])
+            branch, revision, signature = match["branch"], int(match["rev"]), match["sig"]
             continue
         if match := _REMOTE_REVISION.match(stripped):
-            remote_revision = int(match["rev"])
+            remote_revision, remote_signature = int(match["rev"]), match["sig"]
             continue
         if stripped.startswith("Local branch "):
             remote_note = stripped
@@ -231,6 +287,8 @@ def parse_status(text: str) -> Status:
         staged=tuple(sections["staged"]),
         unstaged=tuple(sections["unstaged"]),
         untracked=tuple(sections["untracked"]),
+        signature=signature,
+        remote_signature=remote_signature,
     )
 
 

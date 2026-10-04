@@ -16,7 +16,7 @@ from pathlib import Path
 
 from lore_dcc.backend import parsers
 from lore_dcc.backend.cli import LoreCli
-from lore_dcc.backend.parsers import FileInfo, Status
+from lore_dcc.backend.parsers import FileInfo, RemoteState, Status
 from lore_dcc.errors import LockNotAcquired, LoreCommandError, LoreError
 from lore_dcc.locks import (
     Identity,
@@ -101,6 +101,33 @@ class CommitResult:
 
 
 @dataclass(frozen=True)
+class BehindReport:
+    """Which of a scene's files are newer on the server.
+
+    Attributes:
+        source_behind: True when the scene file itself changed on the server.
+        behind: Repo-relative references that changed on the server, in the
+            order the scene listed them.
+    """
+
+    source_behind: bool
+    behind: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class SyncResult:
+    """Outcome of sync_references.
+
+    Attributes:
+        synced: Repo-relative paths the scoped sync updated.
+        skipped: Paths left out because they have local changes.
+    """
+
+    synced: tuple[str, ...]
+    skipped: tuple[str, ...]
+
+
+@dataclass(frozen=True)
 class _Pending:
     """A local commit that has not reached the server yet."""
 
@@ -131,6 +158,10 @@ class Session:
         touched: Repo-relative paths this session locked, staged or saved.
             The Commit dialog checks them by default.
         outputs: Repo-relative paths the output flow wrote and Lore reports changed.
+        references: Scene file -> the files it reads inside the working copy,
+            all repo-relative, as the DCC last reported them with
+            set_references. Missing files are kept, since a file another
+            user added may be behind.
 
     The sets are mutated under an internal lock; callers that iterate them
     while a worker thread runs should copy them first.
@@ -141,6 +172,7 @@ class Session:
     settings: Settings
     touched: set[str]
     outputs: set[str]
+    references: dict[str, tuple[str, ...]]
 
     def __init__(self, workspace: Workspace, lore: LoreCli, settings: Settings) -> None:
         self.workspace = workspace
@@ -148,6 +180,7 @@ class Session:
         self.settings = settings
         self.touched = set()
         self.outputs = set()
+        self.references = {}
         self._identity: Identity | None = None
         self._branch_id: str | None = None
         self._pending: list[_Pending] = []
@@ -278,6 +311,7 @@ class Session:
             return
         self.lore.stage([self._abs(r) for r in rels])
         self._touch(rels)
+        self._link_remembered(rels)
 
     def mark_saved(self, paths: Sequence[Path | str]) -> None:
         """Run `lore dirty` on files the DCC just saved and add them to touched.
@@ -369,6 +403,103 @@ class Session:
         self._drop(self.outputs, [s.path for s in unchanged])
         return WriteResult(tuple(new), tuple(changed), tuple(s.path for s in released))
 
+    def set_references(self, source: Path | str, refs: Sequence[Path | str]) -> None:
+        """Remember the files `source` reads inside the working copy. Runs no Lore call.
+
+        Replaces every earlier list, since a DCC has one scene open at a time
+        and the Commit dialog offers only that scene's references.
+        Duplicates are dropped.
+        """
+        rel = self._rel(source)
+        unique = tuple(self._unique(refs))
+        with self._lock:
+            self.references = {rel: unique}
+
+    def update_links(self, source: Path | str) -> None:
+        """Make `source`'s `houdini` links match its remembered references.
+
+        Does nothing when no list is remembered for `source` or when `source`
+        is neither tracked nor staged. Adds links to references that exist and
+        are tracked or staged; references that are new and unstaged get no
+        link. Removes links to files the scene no longer reads, which for an
+        empty remembered list is every link, and to references that are no
+        longer tracked or staged, such as one unstaged in the Commit dialog. stage() and commit() call this
+        for every remembered scene they stage, so links ride along with the
+        scene's next commit.
+
+        Raises:
+            LoreCommandError: A dependency command failed.
+        """
+        rel = self._rel(source)
+        refs = self._remembered(rel)
+        if refs is None:
+            return
+        infos = self._file_infos([rel, *refs])
+        staged = {path_key(c.path) for c in self.lore.status().staged if not c.is_dir}
+
+        def linkable(path: str) -> bool:
+            info = infos.get(path_key(path))
+            return path_key(path) in staged or (info is not None and info.tracked)
+
+        if not linkable(rel):
+            return
+        current = self.lore.dependency_list(self._abs(rel))
+        linked = {path_key(p) for p in current}
+        keep = {path_key(r) for r in refs if self._abs(r).exists() and linkable(r)}
+        add = [r for r in refs if path_key(r) in keep and path_key(r) not in linked]
+        drop = [p for p in current if path_key(p) not in keep]
+        if add:
+            self.lore.dependency_add(self._abs(rel), [self._abs(r) for r in add])
+        if drop:
+            self.lore.dependency_remove(self._abs(rel), [self._abs(r) for r in drop])
+
+    def behind(self, source: Path | str) -> BehindReport:
+        """Return which of `source` and its remembered references changed on the server.
+
+        Runs `lore status --revision-only` and stops there unless Lore says the
+        branch is behind remote. An ahead or diverged branch is not checked,
+        since the diff would list the user's own unpushed commits. Otherwise
+        runs one `lore revision diff`.
+        """
+        status = self.lore.revision_status()
+        local, remote = status.signature, status.remote_signature
+        if status.remote_state is not RemoteState.BEHIND or local is None or remote is None:
+            return BehindReport(False, ())
+        changed = {path_key(c.path) for c in self.lore.revision_diff(local, remote) if not c.is_dir}
+        rel = self._rel(source)
+        refs = self._remembered(rel) or ()
+        return BehindReport(path_key(rel) in changed, tuple(r for r in refs if path_key(r) in changed))
+
+    def sync_references(self, paths: Sequence[Path | str]) -> SyncResult:
+        """Run one scoped sync with each path as a root, skipping locally changed ones.
+
+        Dry runs first: every path Lore names as locally changed is dropped
+        and the dry run repeats until it passes, then the real sync runs and
+        the read-only rule is reapplied to the synced files. A refusal that
+        names no known path raises. With nothing left to sync it returns
+        without syncing.
+
+        Raises:
+            LoreCommandError: The sync failed for another reason.
+        """
+        roots = self._unique(paths)
+        skipped: list[str] = []
+        while roots:
+            try:
+                self.lore.sync_roots(roots, dry_run=True)
+            except LoreCommandError as exc:
+                blocked = {path_key(p) for p in parsers.parse_sync_blocked(exc.output)}
+                hit = [r for r in roots if path_key(r) in blocked]
+                if not hit:
+                    raise
+                skipped.extend(hit)
+                roots = [r for r in roots if r not in hit]
+                continue
+            self.lore.sync_roots(roots)
+            self.refresh_read_only(roots)
+            return SyncResult(tuple(roots), tuple(skipped))
+        return SyncResult((), tuple(skipped))
+
     def status(self) -> Status:
         """Return `lore status` for the whole working copy."""
         return self.lore.status()
@@ -390,14 +521,16 @@ class Session:
         `pushed=False`, `push_error` and `diverged`. A failed commit raises.
 
         Committed paths leave `touched` and `outputs` as soon as the local
-        commit succeeds, and are remembered for retry_push. Staged directory
+        commit succeeds, and are remembered for retry_push. Before the commit,
+        update_links runs for every included scene with remembered references,
+        so references staged here get their link in the same commit. Staged directory
         entries are left alone when unstaging, so a directory staged for a file
         outside `include` stays staged.
 
         Raises:
             CommitBlocked: `include` holds a blocked file.
             ValueError: `summary` is blank or `include` is empty.
-            LoreCommandError: Staging or the commit failed.
+            LoreCommandError: Staging, a dependency command or the commit failed.
         """
         summary = summary.strip()
         if not summary:
@@ -419,6 +552,7 @@ class Session:
         ]
         if extra:
             self.lore.unstage([self._abs(r) for r in extra])
+        self._link_remembered(rels)
         message = summary
         if description.strip():
             message = f"{summary}\n\n{description.strip()}"
@@ -526,6 +660,16 @@ class Session:
 
     def _unique(self, paths: Iterable[Path | str]) -> list[str]:
         return list(dict.fromkeys(self._rel(p) for p in paths))
+
+    def _remembered(self, rel: str) -> tuple[str, ...] | None:
+        key = path_key(rel)
+        with self._lock:
+            return next((r for src, r in self.references.items() if path_key(src) == key), None)
+
+    def _link_remembered(self, rels: Iterable[str]) -> None:
+        for rel in rels:
+            if self._remembered(rel) is not None:
+                self.update_links(rel)
 
     def _touch(self, rels: Iterable[str]) -> None:
         with self._lock:

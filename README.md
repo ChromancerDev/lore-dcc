@@ -31,12 +31,21 @@ The package only enables itself in Houdini 22 or newer. The plugin needs no othe
 
 | Where | Actions |
 |---|---|
-| `Lore` menu in the main menu bar | Info, Lock, Discard changes, Collect Outputs, Commit, Enable/Disable |
-| `Lore` shelf | Info, Enable/Disable, Lock, Discard changes, Collect Outputs, Commit |
+| `Lore` menu in the main menu bar | Info, Lock, Discard changes, Collect Outputs, Sync Dependencies, Commit, Enable/Disable |
+| `Lore` shelf | Info, Enable/Disable, Lock, Discard changes, Collect Outputs, Sync Dependencies, Commit |
 | Node right-click, `Lore` | Lock and Discard changes on an asset's library file. Lock Outputs and Collect Outputs on ROPs and File Caches. |
 | Parameter right-click, `Lore` | Lock and Discard changes on the file a string parameter names |
 | Saving | Before saving an unlocked tracked file: "Lore - Lock File?". After saving a new file: "Lore - Stage New File?". Saving over a file someone else locked: "Lore - File Locked by Another User". Turn the prompts off in `lore_dcc_prefs.json` in your Houdini user folder. |
 | After Commit | `Lore - Commit Complete` names the committed revision, the branch it was pushed to and the revision the server is at. |
+| Opening a hip | Checks in the background whether any file the scene reads is newer on the server, and offers `Sync Dependencies` when one is. |
+
+## Dependencies
+
+Every file a scene reads, such as File SOP caches, Alembic and FBX files, textures, USD layers and the HDA libraries it uses, is a reference. When the plugin stages or commits a hip, it records the references inside the working copy as Lore dependency links tagged `houdini`, and removes links the scene no longer uses. New references show in the Commit dialog under `Dependencies` so they commit with the hip. References outside the working copy get a warning, since other users will not have them.
+
+`Sync Dependencies` updates only the references that are newer on the server and reloads them in Houdini. It never touches the open hip unless the hip is behind too and you pick `Sync and reopen`. Files with local changes are skipped and listed.
+
+Lore's scoped sync moves the whole working copy to the server's revision but writes only the files it syncs. Other files that changed on the server keep their old content, `lore status` does not show them, and later syncs do not update them. After that, only `lore file reset <file>` brings such a file up to date, and editing and committing it overwrites the newer version on the server. When you can, run a full `lore sync` outside Houdini instead.
 
 Tracked hip, HDA and cache files are read-only on disk unless you hold their lock. To make a ROP lock its own outputs, set its Pre-Render Script and Post-Render Script to Python:
 

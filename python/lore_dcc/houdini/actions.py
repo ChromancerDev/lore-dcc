@@ -10,16 +10,22 @@ import dataclasses
 import functools
 import logging
 import os
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import Any
 
 import hou
 
 from lore_dcc.errors import LoreError, NotAWorkingCopy
-from lore_dcc.houdini import hooks, host, outputs
-from lore_dcc.locks import LockState
-from lore_dcc.session import Session, WriteResult, new_file_message
+from lore_dcc.houdini import host, outputs, references
+from lore_dcc.locks import LockState, path_key
+from lore_dcc.session import (
+    BehindReport,
+    Session,
+    SyncResult,
+    WriteResult,
+    new_file_message,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -73,7 +79,7 @@ def _rel(session: Session, file: Path | str) -> str:
 
 
 def _library_file(node: Any) -> str | None:
-    return hooks.library_file(node.type().definition())
+    return references.library_file(node.type().definition())
 
 
 def _parm_file(parm: Any, *, must_exist: bool = False) -> str | None:
@@ -176,12 +182,79 @@ def collect_outputs() -> None:
 
 
 @_reported
+def sync_dependencies(confirm: bool = True) -> None:
+    """Sync the files the open scene reads that are newer on the server.
+
+    `confirm=False` skips the question before syncing references only, for
+    callers that already asked. A scene behind the server always asks.
+    """
+    file = _saved_hip()
+    session = _session(file) if file else None
+    if not (file and session):
+        return
+    scene = references.scan(session.workspace.root)
+    session.set_references(file, scene.inside)
+    report = host.run(session.behind, file, title="Checking the server")
+    if not (report.behind or report.source_behind):
+        host.message("Lore - Sync Dependencies", "Every reference is up to date with the server.")
+        return
+    reopen = False
+    if report.source_behind:
+        edited = _has_local_edits(session, file)
+        choice = host.ask(
+            "Lore - Scene Behind Server",
+            _scene_behind_text(report, edited),
+            ["Continue", "Cancel"] if edited else ["Continue", "Sync and reopen", "Cancel"],
+            default="Continue" if edited else "Sync and reopen",
+        )
+        if choice == "Continue" and not report.behind:
+            host.message("Lore - Sync Dependencies", "No references are behind the server.")
+            return
+        reopen = choice == "Sync and reopen"
+        if not (reopen or choice == "Continue"):
+            return
+        if reopen and hou.hipFile.hasUnsavedChanges():
+            confirm = host.ask(
+                "Lore - Discard Unsaved Changes?",
+                "Syncing reopens the scene and drops its unsaved changes.",
+                ["Sync and reopen", "Cancel"],
+                default="Cancel",
+            )
+            if confirm != "Sync and reopen":
+                return
+    elif confirm:
+        choice = host.ask(
+            "Lore - Sync Dependencies?",
+            f"These references are newer on the server:\n{list_paths(report.behind)}",
+            ["Sync", "Cancel"],
+            default="Sync",
+        )
+        if choice != "Sync":
+            return
+    hip_key = path_key(_rel(session, file))
+    roots = [*report.behind, *([_rel(session, file)] if reopen else [])]
+    result = host.run(session.sync_references, roots, title="Syncing")
+    others = [session.workspace.root / p for p in result.synced if path_key(p) != hip_key]
+    if others:
+        references.reload(others)
+    reopened = reopen and any(path_key(p) == hip_key for p in result.synced)
+    if reopened:
+        hou.hipFile.load(file, suppress_save_prompt=True)
+    host.message("Lore - Sync Dependencies", _sync_summary(result, reopen and not reopened))
+
+
+@_reported
 def commit() -> None:
     """Open the Commit dialog."""
     from lore_dcc.ui import dialogs
 
-    session = _session(_hip())
+    hip = _hip()
+    session = _session(hip)
     if session:
+        if os.path.isfile(hip):
+            scene = references.scan(session.workspace.root)
+            session.set_references(hip, scene.inside)
+            warn_outside(scene)
         dialogs.show_commit(session, host.load_prefs())
 
 
@@ -248,6 +321,72 @@ def discard_parm_file(parm: Any) -> None:
     session = _session(file) if file else None
     if file and session:
         _discard_files(session, [file], "")
+
+
+def list_paths(paths: Sequence[str]) -> str:
+    """Return `paths` as indented lines, capped at a few with a count of the rest."""
+    lines = [f"    {p}" for p in paths[:_LISTED]]
+    if len(paths) > _LISTED:
+        lines.append(f"    and {len(paths) - _LISTED} more")
+    return "\n".join(lines)
+
+
+def warn_outside(scene: references.SceneReferences) -> None:
+    """Tell the user which referenced files live outside the working copy."""
+    if not scene.outside:
+        return
+    where = list_paths([f"{where}: {file}" for where, file in scene.outside])
+    host.message(
+        "Lore - References Outside the Repo",
+        "These files are outside the working copy, so other users will not get them:\n"
+        f"{where}\n\nThe scene still commits.",
+    )
+
+
+def _has_local_edits(session: Session, file: str) -> bool:
+    status = host.run(session.lore.check_dirty, [Path(file)], title="Checking the scene")
+    key = path_key(_rel(session, file))
+    return any(path_key(change.path) == key for change in (*status.staged, *status.unstaged))
+
+
+def _scene_behind_text(report: BehindReport, edited: bool) -> str:
+    parts = [
+        (
+            "The open scene is behind the server: a newer revision of it was pushed. "
+            "Saving and committing this copy would overwrite that version."
+        )
+    ]
+    if report.behind:
+        parts.append(f"These references are also behind:\n{list_paths(report.behind)}")
+    if edited:
+        parts.append(
+            "This scene has local changes, so it cannot be synced. "
+            "Continue syncs only the references."
+        )
+    else:
+        parts.append(
+            "Continue syncs only the references. "
+            "Sync and reopen also syncs the scene and reopens it."
+        )
+    return "\n\n".join(parts)
+
+
+def _sync_summary(result: SyncResult, scene_skipped: bool) -> str:
+    parts = [
+        f"Synced {len(result.synced)} file(s):\n{list_paths(result.synced)}"
+        if result.synced
+        else "Nothing was synced."
+    ]
+    if result.skipped:
+        parts.append(
+            f"Skipped:\n{list_paths(result.skipped)}\n"
+            "These have local changes, so Lore left them as they are. Discard changes on a "
+            "file to get the server version. Committing it writes over the newer version "
+            "on the server."
+        )
+    if scene_skipped:
+        parts.append("The scene was not synced or reopened.")
+    return "\n\n".join(parts)
 
 
 def _all_mine(session: Session, paths: list[Path]) -> bool:

@@ -11,7 +11,7 @@ from pathlib import Path
 import pytest
 from lore_dcc import locks as locks_module
 from lore_dcc import session as session_module
-from lore_dcc.backend.cli import LoreCli
+from lore_dcc.backend.cli import ROOTS_ONLY_TAG, LoreCli
 from lore_dcc.errors import (
     LockNotAcquired,
     LoreCommandError,
@@ -24,6 +24,13 @@ from lore_dcc.settings import load_settings
 from lore_dcc.workspace import Workspace
 
 SIG = "9" * 64
+REMOTE_SIG = "8" * 64
+BEHIND = (
+    f"On branch main revision 3 -> {SIG}\n"
+    f"Remote revision 4 -> {REMOTE_SIG}\n"
+    "Local branch is behind remote\n"
+)
+BLOCKED = "[Error] File has local changes: {} (incoming size 7 bytes, file system size 20 bytes)\n"
 BRANCH = "Branch main\n  ID: 7f\n  Latest: " + SIG + "\n  Creator: a@example.com\n"
 HEAD = (
     f"On branch main revision 3 -> {SIG}\n"
@@ -51,6 +58,11 @@ VERBS = (
     ("lock", "query"),
     ("file", "info"),
     ("file", "reset"),
+    ("file", "dependency", "list"),
+    ("file", "dependency", "add"),
+    ("file", "dependency", "remove"),
+    ("revision", "diff"),
+    ("sync",),
     ("auth", "info"),
     ("status",),
     ("stage",),
@@ -78,17 +90,32 @@ class ScriptRunner:
         self.fail: dict[str, tuple[int, str]] = {}
         self.version_out = "lore 0.9.0+783\n"
         self.branch_out = BRANCH
+        self.deps: dict[str, list[str]] = {}
+        self.diff_out = ""
+        self.dirty_roots: set[str] = set()
 
     def __call__(self, argv: list[str], **kwargs: object) -> subprocess.CompletedProcess:
         args = argv[1:] if argv[1] == "--version" else argv[3:]
         verb = next(v for v in VERBS if tuple(args[: len(v)]) == v)
         name = " ".join(verb)
         rest = args[len(verb) :]
-        if verb in (("commit",),):
+        if verb in (("commit",), ("revision", "diff")):
             shown = rest
+        elif verb == ("sync",):
+            assert rest[-2:] in (["--dependency-tag", ROOTS_ONLY_TAG], [ROOTS_ONLY_TAG, "--dry-run"])
+            shown = [a for a in rest if a not in ("--dependency-tag", ROOTS_ONLY_TAG)]
         else:
-            shown = [Path(a).relative_to(self.root).as_posix() for a in rest]
+            shown = [
+                Path(a).relative_to(self.root).as_posix() for a in rest if a != "--tag=houdini"
+            ]
+        if verb == ("sync",) and "--dry-run" in rest:
+            name = "sync --dry-run"
         self.log.append((name, shown))
+        hit = [r for r in shown if r in self.dirty_roots] if verb == ("sync",) else []
+        if hit:
+            out = "".join(BLOCKED.format(r) for r in hit)
+            out += "[Error] Local modifications prevent synchronization\n"
+            return subprocess.CompletedProcess(argv, 39, out, "")
         if name in self.fail:
             code, out = self.fail[name]
             return subprocess.CompletedProcess(argv, code, out, "")
@@ -114,6 +141,15 @@ class ScriptRunner:
                         f"Context: {'0' * 32}\nHash:    {'0' * 64}\nStatus:  {self.info[key]}\n"
                     )
             return "".join(reversed(blocks))
+        if name == "file dependency list":
+            lines = "".join(f"  {d} [houdini]\n" for d in self.deps.get(rels[0], []))
+            return f"{rels[0]}:\n{lines}"
+        if name == "file dependency add":
+            self.deps.setdefault(rels[0], []).extend(rels[1:])
+        if name == "file dependency remove":
+            self.deps[rels[0]] = [d for d in self.deps.get(rels[0], []) if d not in rels[1:]]
+        if name == "revision diff":
+            return self.diff_out
         if name == "lock query":
             if self.locks is None:
                 raise AssertionError("handled through fail")
@@ -848,3 +884,221 @@ def test_unreadable_commit_and_push_output_leaves_the_revisions_none(env: Env) -
     result = env.session.commit(["a.hip"], "Summary")
     assert result.pushed
     assert (result.revision, result.pushed_revision, result.branch) == (None, None, None)
+
+
+def staged(*paths: str) -> str:
+    return HEAD + "Changes staged for commit:\n" + "".join(f"A {p}\n" for p in paths)
+
+
+def link_env(env: Env, refs: list[str], scene: str = "scene.hip") -> None:
+    env.make(scene)
+    env.runner.info = {scene: "-", "tool.hda": "-"}
+    env.session.set_references(scene, refs)
+
+
+def test_set_references_stores_relative_unique_and_replaces(env: Env) -> None:
+    env.session.set_references(env.root / "scene.hip", [env.root / "a.bgeo", "a.bgeo", "b.bgeo"])
+    assert env.session.references == {"scene.hip": ("a.bgeo", "b.bgeo")}
+    env.session.set_references("scene.hip", ["c.bgeo"])
+    assert env.session.references == {"scene.hip": ("c.bgeo",)}
+    assert env.runner.log == []
+
+
+def test_windows_set_references_replaces_a_differently_cased_scene(
+    env: Env, windows: None
+) -> None:
+    env.session.set_references("Scene.hip", ["a.bgeo"])
+    env.session.set_references("scene.HIP", ["b.bgeo"])
+    assert env.session.references == {"scene.HIP": ("b.bgeo",)}
+
+
+def test_update_links_without_remembered_references_runs_nothing(env: Env) -> None:
+    env.session.update_links("scene.hip")
+    assert env.runner.log == []
+
+
+def test_update_links_adds_only_tracked_or_staged_existing_references(env: Env) -> None:
+    link_env(env, ["tool.hda", "new.bgeo", "fresh.bgeo", "gone.bgeo"])
+    for name in ("tool.hda", "new.bgeo", "fresh.bgeo"):
+        env.make(name)
+    env.runner.info["gone.bgeo"] = "-"
+    env.runner.status_out = staged("new.bgeo")
+    env.session.update_links("scene.hip")
+    assert env.runner.calls("file dependency add") == [["scene.hip", "tool.hda", "new.bgeo"]]
+    assert "file dependency remove" not in env.runner.verbs()
+    assert env.runner.verbs().count("file info") == 1
+
+
+def test_update_links_skips_references_already_linked(env: Env) -> None:
+    link_env(env, ["tool.hda"])
+    env.make("tool.hda")
+    env.runner.deps = {"scene.hip": ["tool.hda"]}
+    env.session.update_links("scene.hip")
+    assert "file dependency add" not in env.runner.verbs()
+
+
+def test_update_links_removes_links_the_scene_no_longer_reads(env: Env) -> None:
+    link_env(env, ["tool.hda"])
+    env.make("tool.hda")
+    env.runner.deps = {"scene.hip": ["tool.hda", "old.hda"]}
+    env.session.update_links("scene.hip")
+    assert env.runner.calls("file dependency remove") == [["scene.hip", "old.hda"]]
+    assert "file dependency add" not in env.runner.verbs()
+
+
+def test_update_links_with_an_empty_list_removes_every_link(env: Env) -> None:
+    link_env(env, [])
+    env.runner.deps = {"scene.hip": ["old.hda"]}
+    env.session.update_links("scene.hip")
+    assert env.runner.calls("file dependency remove") == [["scene.hip", "old.hda"]]
+
+
+def test_update_links_on_an_untracked_unstaged_scene_does_nothing(env: Env) -> None:
+    link_env(env, ["tool.hda"])
+    env.runner.info = {"tool.hda": "-"}
+    env.make("tool.hda")
+    env.session.update_links("scene.hip")
+    assert not [v for v in env.runner.verbs() if v.startswith("file dependency")]
+
+
+def test_update_links_accepts_a_staged_new_scene(env: Env) -> None:
+    link_env(env, ["tool.hda"])
+    env.runner.info = {"tool.hda": "-"}
+    env.runner.status_out = staged("scene.hip")
+    env.make("tool.hda")
+    env.session.update_links("scene.hip")
+    assert env.runner.calls("file dependency add") == [["scene.hip", "tool.hda"]]
+
+
+def test_windows_update_links_finds_the_scene_case_insensitively(env: Env, windows: None) -> None:
+    link_env(env, ["tool.hda"])
+    env.make("tool.hda")
+    env.runner.fold_info = True
+    env.session.update_links("SCENE.HIP")
+    (call,) = env.runner.calls("file dependency add")
+    assert [p.casefold() for p in call] == ["scene.hip", "tool.hda"]
+
+
+def test_stage_updates_links_of_a_remembered_scene(env: Env) -> None:
+    link_env(env, ["tool.hda"])
+    env.make("tool.hda")
+    env.runner.status_out = staged("scene.hip")
+    env.session.stage(["scene.hip"])
+    assert env.runner.verbs().index("stage") < env.runner.verbs().index("file dependency add")
+    assert env.runner.calls("file dependency add") == [["scene.hip", "tool.hda"]]
+
+
+def test_stage_without_remembered_references_adds_no_links(env: Env) -> None:
+    env.make("a.hip")
+    env.session.stage(["a.hip"])
+    assert env.runner.verbs() == ["stage"]
+
+
+def test_commit_links_untracked_references_that_are_included(env: Env) -> None:
+    link_env(env, ["fresh.bgeo"])
+    env.make("fresh.bgeo")
+    env.runner.status_out = staged("fresh.bgeo")
+    env.session.commit(["scene.hip", "fresh.bgeo"], "Summary", push=False)
+    verbs = env.runner.verbs()
+    assert verbs.index("stage") < verbs.index("file dependency add") < verbs.index("commit")
+    assert env.runner.calls("file dependency add") == [["scene.hip", "fresh.bgeo"]]
+
+
+def test_commit_gives_no_link_to_an_unchecked_untracked_reference(env: Env) -> None:
+    link_env(env, ["fresh.bgeo"])
+    env.make("fresh.bgeo")
+    env.session.commit(["scene.hip"], "Summary", push=False)
+    assert "file dependency add" not in env.runner.verbs()
+
+
+def test_behind_stops_when_the_signatures_match(env: Env) -> None:
+    env.session.set_references("scene.hip", ["a.bgeo"])
+    assert env.session.behind("scene.hip") == session_module.BehindReport(False, ())
+    assert env.runner.verbs() == ["status --revision-only"]
+
+
+def test_behind_stops_when_the_remote_signature_is_missing(env: Env) -> None:
+    env.runner.check_out = f"On branch main revision 3 -> {SIG}\n"
+    assert env.session.behind("scene.hip") == session_module.BehindReport(False, ())
+    assert "revision diff" not in env.runner.verbs()
+
+
+def test_behind_lists_changed_references_in_scene_order_and_flags_the_scene(env: Env) -> None:
+    env.session.set_references("scene.hip", ["a.bgeo", "b.bgeo", "c.bgeo"])
+    env.runner.check_out = BEHIND
+    env.runner.diff_out = "M scene.hip\nM c.bgeo\nM a.bgeo\nA other/\nM x.bgeo\n"
+    report = env.session.behind("scene.hip")
+    assert report == session_module.BehindReport(True, ("a.bgeo", "c.bgeo"))
+    assert env.runner.calls("revision diff") == [[SIG, "--target", REMOTE_SIG]]
+
+
+def test_behind_without_changes_to_the_scene_or_references(env: Env) -> None:
+    env.session.set_references("scene.hip", ["a.bgeo"])
+    env.runner.check_out = BEHIND
+    env.runner.diff_out = "M x.bgeo\n"
+    assert env.session.behind("scene.hip") == session_module.BehindReport(False, ())
+
+
+def test_sync_references_syncs_every_root_when_the_dry_run_passes(env: Env) -> None:
+    result = env.session.sync_references(["a.hip", "b.bgeo"])
+    assert result.synced == ("a.hip", "b.bgeo")
+    assert result.skipped == ()
+    roots = ["--root-file", "a.hip", "--root-file", "b.bgeo"]
+    assert env.runner.calls("sync --dry-run") == [[*roots, "--dry-run"]]
+    assert env.runner.calls("sync") == [roots]
+
+
+def test_sync_references_drops_locally_changed_roots_and_retries(env: Env) -> None:
+    env.runner.dirty_roots = {"b.bgeo"}
+    result = env.session.sync_references(["a.bgeo", "b.bgeo"])
+    assert (result.synced, result.skipped) == (("a.bgeo",), ("b.bgeo",))
+    dry = env.runner.calls("sync --dry-run")
+    assert [r.count("--root-file") for r in dry] == [2, 1]
+    assert env.runner.calls("sync") == [["--root-file", "a.bgeo"]]
+
+
+def test_sync_references_raises_when_the_refusal_names_no_root(env: Env) -> None:
+    env.runner.fail["sync --dry-run"] = (39, BLOCKED.format("other.bgeo"))
+    with pytest.raises(LoreCommandError):
+        env.session.sync_references(["a.bgeo"])
+    assert "sync" not in env.runner.verbs()
+
+
+def test_sync_references_with_every_root_blocked_does_not_sync(env: Env) -> None:
+    env.runner.dirty_roots = {"a.bgeo", "b.bgeo"}
+    result = env.session.sync_references(["a.bgeo", "b.bgeo"])
+    assert result == session_module.SyncResult((), ("a.bgeo", "b.bgeo"))
+    assert "sync" not in env.runner.verbs()
+
+
+def test_sync_references_reapplies_read_only_after_the_sync(env: Env) -> None:
+    path = env.make("a.hip")
+    env.runner.info = {"a.hip": "-"}
+    env.session.sync_references(["a.hip"])
+    assert env.runner.verbs().index("file info") > env.runner.verbs().index("sync")
+    assert not writable(path)
+
+
+def test_update_links_removes_a_link_to_a_reference_no_longer_staged(env: Env) -> None:
+    link_env(env, ["new.bgeo"])
+    env.make("new.bgeo")
+    env.runner.deps = {"scene.hip": ["new.bgeo"]}
+    env.session.update_links("scene.hip")
+    assert env.runner.calls("file dependency remove") == [["scene.hip", "new.bgeo"]]
+
+
+def test_set_references_forgets_the_previous_scene(env: Env) -> None:
+    env.session.set_references("a.hip", ["a.bgeo"])
+    env.session.set_references("b.hip", ["b.bgeo"])
+    assert env.session.references == {"b.hip": ("b.bgeo",)}
+
+
+@pytest.mark.parametrize(
+    "note", ["Local branch has diverged, synchronize to merge", "Local branch in sync with remote"]
+)
+def test_behind_skips_a_branch_that_is_not_behind(env: Env, note: str) -> None:
+    env.session.set_references("scene.hip", ["a.bgeo"])
+    env.runner.check_out = BEHIND.replace("Local branch is behind remote", note)
+    env.runner.diff_out = "M a.bgeo\n"
+    assert env.session.behind("scene.hip") == session_module.BehindReport(False, ())
+    assert "revision diff" not in env.runner.verbs()

@@ -1,27 +1,29 @@
 """Rows and texts for the Commit dialog. Pure Python, no Qt.
 
 `build_rows` turns `lore status` plus per-file lock state into the ordered
-rows the dialog shows. Everything is linear in the number of changed files, so
+rows the dialog shows. New files a scene reads get their own group, so they can
+be committed together with the scene's dependency links. Everything is linear in the number of changed files, so
 a repository with thousands of untracked entries stays responsive.
 """
 
 from __future__ import annotations
 
 from collections.abc import Collection, Iterable, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from itertools import chain
 from pathlib import Path
 from typing import Protocol
 
-from lore_dcc.backend.parsers import RemoteState, Status
+from lore_dcc.backend.parsers import Change, RemoteState, Status
 from lore_dcc.locks import LockState, path_key
 from lore_dcc.session import CommitResult, FileState
 
 GROUP_SESSION = "This session"
 GROUP_OUTPUTS = "Outputs"
+GROUP_DEPENDENCIES = "Dependencies"
 GROUP_OTHER = "Other changes"
 GROUP_BLOCKED = "Cannot commit"
-GROUPS = (GROUP_SESSION, GROUP_OUTPUTS, GROUP_OTHER, GROUP_BLOCKED)
+GROUPS = (GROUP_SESSION, GROUP_OUTPUTS, GROUP_DEPENDENCIES, GROUP_OTHER, GROUP_BLOCKED)
 
 CODE_WORDS = {"M": "Modified", "A": "Added", "D": "Deleted"}
 
@@ -71,6 +73,7 @@ class CommitSource(Protocol):
 
     touched: set[str]
     outputs: set[str]
+    references: dict[str, tuple[str, ...]]
 
     def status(self) -> Status: ...
 
@@ -119,6 +122,7 @@ def build_rows(
     states: Iterable[FileState],
     touched: Collection[str],
     outputs: Collection[str],
+    references: Collection[str] = (),
 ) -> list[CommitRow]:
     """Build the dialog rows, grouped in GROUPS order.
 
@@ -130,6 +134,9 @@ def build_rows(
             as not lockable.
         touched: Paths this session locked, staged or saved.
         outputs: Paths the output flow wrote.
+        references: Repo-relative paths scenes read. One that is not tracked
+            goes to "Dependencies", checked, unless it is already in "This
+            session" or "Outputs".
 
     Returns:
         Rows ordered by group, then by status order within the group. A file
@@ -138,6 +145,7 @@ def build_rows(
     by_path = {path_key(state.path): state for state in states}
     touched_keys = {path_key(p) for p in touched}
     output_keys = {path_key(p) for p in outputs}
+    reference_keys = {path_key(p) for p in references}
     staged_keys = {path_key(c.path) for c in status.staged if not c.is_dir}
     buckets: dict[str, list[CommitRow]] = {group: [] for group in GROUPS}
     for path, code in collect_changes(status).items():
@@ -154,6 +162,8 @@ def build_rows(
             group, checked = GROUP_SESSION, True
         elif key in output_keys:
             group, checked = GROUP_OUTPUTS, True
+        elif key in reference_keys and state is not None and not state.tracked:
+            group, checked = GROUP_DEPENDENCIES, True
         else:
             group, checked = GROUP_OTHER, False
         checked = checked or key in staged_keys
@@ -162,11 +172,24 @@ def build_rows(
 
 
 def load_rows(session: CommitSource) -> tuple[Status, list[CommitRow]]:
-    """Read status and file states from a session and build the rows."""
+    """Read status and file states from a session and build the rows.
+
+    Untracked references that exist on disk but are missing from `lore status`
+    get an added row, since Lore does not always list new files there.
+    """
     status = session.status()
     paths = list(collect_changes(status))
-    states = session.file_states(paths) if paths else []
-    return status, build_rows(status, states, session.touched, session.outputs)
+    refs = list(dict.fromkeys(r for group in session.references.values() for r in group))
+    states = session.file_states(list(dict.fromkeys([*paths, *refs]))) if paths or refs else []
+    skip = {path_key(p) for p in paths}
+    ref_keys = {path_key(r) for r in refs}
+    added = tuple(
+        Change("A", s.path, False)
+        for s in states
+        if s.exists and not s.tracked and path_key(s.path) in ref_keys - skip
+    )
+    shown = replace(status, untracked=status.untracked + added)
+    return status, build_rows(shown, states, session.touched, session.outputs, refs)
 
 
 def remote_state_text(state: RemoteState) -> str:

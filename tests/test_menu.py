@@ -31,12 +31,14 @@ def test_menu_sits_before_help_and_lists_the_actions_in_order() -> None:
     assert sub.findtext("insertBefore") == "help_menu"
     items = [(i.findtext("label"), i.findtext("scriptCode")) for i in sub.findall("scriptItem")]
     assert [label for label, _ in items] == [
-        "Info", "Lock", "Discard changes", "Collect Outputs", "Commit", "Enable/Disable",
+        "Info", "Lock", "Discard changes", "Collect Outputs", "Sync Dependencies", "Commit",
+        "Enable/Disable",
     ]  # fmt: skip
     children = [child.tag for child in sub if child.tag in ("scriptItem", "separatorItem")]
-    assert children.index("separatorItem") == 5
+    assert children.index("separatorItem") == 6
     assert [_called(code or "") for _, code in items] == [
-        "info", "lock", "discard", "collect_outputs", "commit", "toggle_enabled",
+        "info", "lock", "discard", "collect_outputs", "sync_dependencies", "commit",
+        "toggle_enabled",
     ]  # fmt: skip
 
 

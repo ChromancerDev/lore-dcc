@@ -8,10 +8,10 @@ from types import SimpleNamespace
 
 import pytest
 from lore_dcc.errors import NotAWorkingCopy
-from lore_dcc.houdini import actions, hooks, host
+from lore_dcc.houdini import actions, hooks, host, references
 from lore_dcc.locks import LockState
 from lore_dcc.prefs import Prefs
-from lore_dcc.session import FileState, WriteResult
+from lore_dcc.session import BehindReport, FileState, SyncResult, WriteResult
 from lore_dcc.ui import TITLE_PREFIX
 
 
@@ -20,7 +20,7 @@ class FakeSession:
         self.calls: list[tuple[str, object]] = []
         self.state = {"exists": True, "tracked": True, "lock": LockState.NOT_LOCKED, "owner": None}
         self.returns: dict[str, object] = {}
-        self.workspace = SimpleNamespace(relative=lambda p: Path(p).name)
+        self.workspace = SimpleNamespace(relative=lambda p: Path(p).name, root=Path("/work"))
 
     def file_states(self, paths):
         self.calls.append(("file_states", list(paths)))
@@ -41,14 +41,39 @@ class FakeSession:
 
 
 @pytest.fixture
-def env(monkeypatch: pytest.MonkeyPatch):
+def env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
     session = FakeSession()
     answers: list[str | None] = []
     asked: list[tuple[str, list[str]]] = []
     texts: list[str] = []
+    hip = tmp_path / "scene.hip"
+    hip.write_text("x")
     state = SimpleNamespace(
-        session=session, prefs=Prefs(), asked=asked, answers=answers, ui=True, texts=texts
+        session=session,
+        prefs=Prefs(),
+        asked=asked,
+        answers=answers,
+        ui=True,
+        texts=texts,
+        messages=[],
+        hip=str(hip),
+        unsaved=False,
+        loaded=[],
+        reloaded=[],
+        scene=references.SceneReferences((Path("/work/geo/a.bgeo"),), ()),
     )
+    monkeypatch.setattr(
+        hooks.hou,
+        "hipFile",
+        SimpleNamespace(
+            path=lambda: state.hip,
+            hasUnsavedChanges=lambda: state.unsaved,
+            load=lambda f, **kw: state.loaded.append(f),
+        ),
+        raising=False,
+    )
+    monkeypatch.setattr(references, "scan", lambda root: state.scene)
+    monkeypatch.setattr(references, "reload", lambda paths: state.reloaded.append(list(paths)))
 
     def ask(title, text, buttons, default=None):
         assert title.startswith(TITLE_PREFIX), title
@@ -65,6 +90,7 @@ def env(monkeypatch: pytest.MonkeyPatch):
     def message(title, text):
         assert title.startswith(TITLE_PREFIX), title
         asked.append((title, []))
+        state.messages.append(text)
 
     monkeypatch.setattr(host, "message", message)
     monkeypatch.setattr(host, "error", lambda exc, context="": asked.append(("error", [])))
@@ -221,9 +247,44 @@ def test_not_a_working_copy_is_silent(env, monkeypatch: pytest.MonkeyPatch) -> N
 def test_after_save_marks_then_offers_to_stage_a_new_file(env) -> None:
     env.session.state.update(tracked=False)
     env.answers.append("Stage")
-    hooks.after_save("a.hip")
+    hooks.after_save(env.hip)
     assert env.asked == [("Lore - Stage New File?", ["Stage", "Not now"])]
-    assert env.session.names() == ["mark_saved", "file_states", "is_staged", "stage"]
+    assert env.session.names() == [
+        "mark_saved", "file_states", "is_staged", "set_references", "stage",
+    ]  # fmt: skip
+    assert env.session.calls[3] == ("set_references", [env.hip, env.scene.inside])
+
+
+def test_staging_another_file_records_no_references(env, tmp_path: Path) -> None:
+    env.session.state.update(tracked=False)
+    env.answers.append("Stage")
+    hooks.after_save(str(tmp_path / "tool.hda"))
+    assert "set_references" not in env.session.names()
+    assert "stage" in env.session.names()
+
+
+def test_staging_the_hip_warns_about_files_outside_the_repo(env) -> None:
+    env.scene = references.SceneReferences((), (("/obj/a:file", "D:/ext/a.bgeo"),))
+    env.session.state.update(tracked=False)
+    env.answers.append("Stage")
+    hooks.after_save(env.hip)
+    assert [t for t, _ in env.asked] == [
+        "Lore - Stage New File?",
+        "Lore - References Outside the Repo",
+    ]
+    assert "/obj/a:file: D:/ext/a.bgeo" in env.messages[0]
+    assert env.session.names()[-1] == "stage"
+
+
+def test_a_failing_scan_does_not_stop_staging(env, monkeypatch: pytest.MonkeyPatch) -> None:
+    def boom(root):
+        raise RuntimeError("scan")
+
+    monkeypatch.setattr(references, "scan", boom)
+    env.session.state.update(tracked=False)
+    env.answers.append("Stage")
+    hooks.after_save(env.hip)
+    assert env.session.names()[-1] == "stage"
 
 
 def test_after_save_does_not_ask_when_the_new_file_is_already_staged(env) -> None:
@@ -250,17 +311,67 @@ def test_after_save_skips_staging_for_tracked_locked_or_declined(env) -> None:
 
 
 def test_after_load_drops_cached_identity_then_refreshes_the_read_only_bit(env) -> None:
+    env.ui = False
     hooks.after_load("a.hip")
     assert env.session.calls == [("invalidate", []), ("refresh_read_only", ["a.hip"])]
     assert env.asked == []
 
 
-def test_library_file_ignores_embedded_and_missing_definitions() -> None:
-    assert hooks.library_file(None) is None
-    assert hooks.library_file(SimpleNamespace(libraryFilePath=lambda: "Embedded")) is None
-    assert hooks.library_file(SimpleNamespace(libraryFilePath=lambda: "")) is None
-    absolute = os.path.abspath("lib.hda")
-    assert hooks.library_file(SimpleNamespace(libraryFilePath=lambda: absolute)) == absolute
+@pytest.fixture
+def background(env, monkeypatch: pytest.MonkeyPatch):
+    tasks = pytest.importorskip("lore_dcc.ui.tasks")
+    started: list[tuple[object, tuple, object]] = []
+    monkeypatch.setattr(
+        tasks, "run_in_background", lambda fn, *a, on_done: started.append((fn, a, on_done))
+    )
+    synced = []
+    monkeypatch.setattr(actions, "sync_dependencies", lambda confirm=True: synced.append(confirm))
+    return SimpleNamespace(started=started, synced=synced)
+
+
+def test_after_load_records_references_and_checks_the_server_in_the_background(
+    env, background
+) -> None:
+    hooks.after_load(env.hip)
+    assert env.session.names() == ["invalidate", "refresh_read_only", "set_references"]
+    assert env.session.calls[2] == ("set_references", [env.hip, env.scene.inside])
+    ((fn, args, _),) = background.started
+    fn(*args)
+    assert env.session.calls[-1] == ("behind", [env.hip])
+    assert env.asked == []
+
+
+def test_after_load_offers_a_sync_when_something_is_behind(env, background) -> None:
+    hooks.after_load(env.hip)
+    env.answers.append("Sync Dependencies")
+    background.started[0][2](BehindReport(True, ("geo/a.bgeo",)), None)
+    assert env.asked == [("Lore - Dependencies Behind Server", ["Sync Dependencies", "Not now"])]
+    assert "scene itself is behind" in env.texts[0] and "geo/a.bgeo" in env.texts[0]
+    assert background.synced == [False]
+    env.answers.append("Not now")
+    background.started[0][2](BehindReport(False, ("geo/a.bgeo",)), None)
+    assert background.synced == [False]
+
+
+def test_after_load_result_is_dropped_on_error_nothing_behind_or_another_scene(
+    env, background, caplog
+) -> None:
+    hooks.after_load(env.hip)
+    done = background.started[0][2]
+    with caplog.at_level("WARNING", logger="lore_dcc.houdini.hooks"):
+        done(None, RuntimeError("offline"))
+    assert "offline" in caplog.text
+    done(BehindReport(False, ()), None)
+    env.hip = "other.hip"
+    done(BehindReport(True, ("geo/a.bgeo",)), None)
+    assert env.asked == []
+
+
+def test_after_load_without_a_ui_skips_the_reference_check(env, background) -> None:
+    env.ui = False
+    hooks.after_load(env.hip)
+    assert background.started == []
+    assert "set_references" not in env.session.names()
 
 
 def test_describe_write_lists_each_group_and_truncates() -> None:
@@ -459,3 +570,128 @@ def test_locked_by_another_user_wording(env, tmp_path: Path) -> None:
         )
     ]
     os.chmod(target, 0o666)
+
+
+def sync(env, *, behind, result=None, edited=False, answers=()):
+    env.session.returns["behind"] = behind
+    env.session.returns["sync_references"] = result
+    env.session.lore = SimpleNamespace(
+        check_dirty=lambda paths: SimpleNamespace(
+            staged=(), unstaged=(SimpleNamespace(path="scene.hip"),) if edited else ()
+        )
+    )
+    env.answers.extend(answers)
+    actions.sync_dependencies()
+
+
+def test_sync_dependencies_with_nothing_behind_only_says_so(env) -> None:
+    sync(env, behind=BehindReport(False, ()))
+    assert env.session.names() == ["set_references", "behind"]
+    assert env.asked == [("Lore - Sync Dependencies", [])]
+    assert env.messages == ["Every reference is up to date with the server."]
+
+
+def test_sync_dependencies_syncs_behind_references_and_reloads_them(env) -> None:
+    result = SyncResult(("geo/a.bgeo", "tex/b.exr"), ())
+    behind = BehindReport(False, ("geo/a.bgeo", "tex/b.exr"))
+    sync(env, behind=behind, result=result, answers=["Sync"])
+    assert env.asked[0] == ("Lore - Sync Dependencies?", ["Sync", "Cancel"])
+    assert env.session.calls[-1] == ("sync_references", ["geo/a.bgeo", "tex/b.exr"])
+    assert env.reloaded == [[Path("/work/geo/a.bgeo"), Path("/work/tex/b.exr")]]
+    assert env.loaded == []
+    assert "Synced 2 file(s)" in env.messages[-1]
+
+
+def test_sync_dependencies_cancel_syncs_nothing(env) -> None:
+    sync(env, behind=BehindReport(False, ("geo/a.bgeo",)), answers=["Cancel"])
+    assert "sync_references" not in env.session.names()
+
+
+def test_sync_dependencies_reports_skipped_files(env) -> None:
+    result = SyncResult(("geo/a.bgeo",), ("tex/b.exr",))
+    behind = BehindReport(False, ("geo/a.bgeo", "tex/b.exr"))
+    sync(env, behind=behind, result=result, answers=["Sync"])
+    assert "tex/b.exr" in env.messages[-1]
+    assert "Committing it writes over the newer version" in env.messages[-1]
+
+
+def test_behind_scene_offers_reopen_and_warns_about_overwriting(env) -> None:
+    result = SyncResult(("geo/a.bgeo", "scene.hip"), ())
+    behind = BehindReport(True, ("geo/a.bgeo",))
+    sync(env, behind=behind, result=result, answers=["Sync and reopen"])
+    assert env.asked[0] == (
+        "Lore - Scene Behind Server",
+        ["Continue", "Sync and reopen", "Cancel"],
+    )
+    assert "behind the server" in env.texts[0] and "overwrite" in env.texts[0]
+    assert env.session.calls[-1] == ("sync_references", ["geo/a.bgeo", "scene.hip"])
+    assert env.reloaded == [[Path("/work/geo/a.bgeo")]]
+    assert env.loaded == [env.hip]
+
+
+def test_reopen_with_unsaved_changes_asks_to_discard_them(env) -> None:
+    env.unsaved = True
+    sync(env, behind=BehindReport(True, ()), answers=["Sync and reopen", "Cancel"])
+    assert [t for t, _ in env.asked] == [
+        "Lore - Scene Behind Server",
+        "Lore - Discard Unsaved Changes?",
+    ]
+    assert env.asked[1][1] == ["Sync and reopen", "Cancel"]
+    assert "sync_references" not in env.session.names()
+    assert env.loaded == []
+
+
+def test_continue_syncs_only_references_and_does_not_reopen(env) -> None:
+    result = SyncResult(("geo/a.bgeo",), ())
+    sync(env, behind=BehindReport(True, ("geo/a.bgeo",)), result=result, answers=["Continue"])
+    assert env.session.calls[-1] == ("sync_references", ["geo/a.bgeo"])
+    assert env.loaded == []
+
+
+def test_continue_with_no_behind_references_has_nothing_to_sync(env) -> None:
+    sync(env, behind=BehindReport(True, ()), answers=["Continue"])
+    assert "sync_references" not in env.session.names()
+    assert env.asked[-1][0] == "Lore - Sync Dependencies"
+
+
+def test_a_scene_with_local_edits_cannot_be_reopened(env) -> None:
+    result = SyncResult(("geo/a.bgeo",), ())
+    behind = BehindReport(True, ("geo/a.bgeo",))
+    sync(env, behind=behind, result=result, edited=True, answers=["Continue"])
+    assert env.asked[0] == ("Lore - Scene Behind Server", ["Continue", "Cancel"])
+    assert "local changes" in env.texts[0]
+    assert env.session.calls[-1] == ("sync_references", ["geo/a.bgeo"])
+
+
+def test_a_skipped_scene_is_reported_and_not_reopened(env) -> None:
+    result = SyncResult(("geo/a.bgeo",), ("scene.hip",))
+    behind = BehindReport(True, ("geo/a.bgeo",))
+    sync(env, behind=behind, result=result, answers=["Sync and reopen"])
+    assert env.loaded == []
+    assert "The scene was not synced or reopened." in env.messages[-1]
+
+
+def test_long_lists_are_capped(env) -> None:
+    names = tuple(f"geo/{i}.bgeo" for i in range(12))
+    sync(env, behind=BehindReport(False, names), answers=["Cancel"])
+    assert "and 4 more" in env.texts[0]
+
+
+def test_warn_outside_lists_where_and_file_and_only_warns(env) -> None:
+    actions.warn_outside(references.SceneReferences((), ()))
+    assert env.asked == []
+    actions.warn_outside(references.SceneReferences((), (("Sop/ext", "D:/ext/a.hda"),)))
+    assert env.asked == [("Lore - References Outside the Repo", [])]
+    assert "Sop/ext: D:/ext/a.hda" in env.messages[0]
+    assert "other users will not get" in env.messages[0] and "still commits" in env.messages[0]
+
+
+def test_commit_records_references_and_warns_before_the_dialog(env, monkeypatch) -> None:
+    dialogs = pytest.importorskip("lore_dcc.ui.dialogs")
+    env.scene = references.SceneReferences((), (("Sop/ext", "D:/ext/a.hda"),))
+    shown = []
+    monkeypatch.setattr(dialogs, "show_commit", lambda session, prefs: shown.append(session))
+    actions.commit()
+    assert env.session.names() == ["set_references"]
+    assert [t for t, _ in env.asked] == ["Lore - References Outside the Repo"]
+    assert shown == [env.session]
