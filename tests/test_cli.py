@@ -6,8 +6,14 @@ import subprocess
 from pathlib import Path
 
 import pytest
+from lore_dcc import locks as locks_module
 from lore_dcc.backend import cli
-from lore_dcc.errors import LockNotAcquired, LoreCommandError, LoreVersionError
+from lore_dcc.errors import (
+    LockNotAcquired,
+    LoreCommandError,
+    LoreOutputError,
+    LoreVersionError,
+)
 
 SIG = "9" * 64
 
@@ -124,3 +130,67 @@ def test_missing_executable(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> 
     monkeypatch.setattr(cli.shutil, "which", lambda name: None)
     with pytest.raises(cli.LoreNotFound):
         cli.LoreCli(tmp_path)
+
+
+FILE_INFO_BLOCK = (
+    "Path:    {path}\nType:    file\nSize:    1\nMode:    000\n"
+    f"Context: {'0' * 32}\nHash:    {'0' * 64}\nStatus:  -\n"
+)
+
+
+def test_file_info_runs_absolute_paths_and_merges_batches(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(cli, "BATCH_SIZE", 1)
+    runner = FakeRunner(
+        (0, FILE_INFO_BLOCK.format(path="b.hip")),
+        (0, ""),
+    )
+    infos = make(tmp_path, runner).file_info([Path("b.hip"), Path("missing.hip")])
+    assert list(infos) == ["b.hip"]
+    assert runner.calls[0] == [
+        "lore", "-P", "--non-interactive", "file", "info", str(tmp_path.resolve() / "b.hip"),
+    ]  # fmt: skip
+    assert len(runner.calls) == 2
+
+
+def test_file_info_empty_paths_runs_nothing(tmp_path: Path) -> None:
+    runner = FakeRunner()
+    assert make(tmp_path, runner).file_info([]) == {}
+    assert runner.calls == []
+
+
+def test_file_info_unknown_output_raises(tmp_path: Path) -> None:
+    runner = FakeRunner((0, FILE_INFO_BLOCK.format(path="a.hip").replace("-", "Weird")))
+    with pytest.raises(LoreOutputError):
+        make(tmp_path, runner).file_info([Path("a.hip")])
+
+
+def test_branch_info_runs_branch_info(tmp_path: Path) -> None:
+    runner = FakeRunner((0, "Branch main\n  ID: ab12\n"))
+    info = make(tmp_path, runner).branch_info()
+    assert info.id == "ab12"
+    assert runner.calls == [["lore", "-P", "--non-interactive", "branch", "info"]]
+
+
+def test_branch_info_unknown_output_raises(tmp_path: Path) -> None:
+    runner = FakeRunner((0, "Branch main\n  ID: ab12\n  Colour: red\n"))
+    with pytest.raises(LoreOutputError):
+        make(tmp_path, runner).branch_info()
+
+
+def test_lock_acquire_held_check_is_case_insensitive_on_windows(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(locks_module, "CASE_INSENSITIVE", True)
+    runner = FakeRunner((0, "Lock acquired on files:\nscenes/A.HIP\n"))
+    make(tmp_path, runner).lock_acquire([Path("scenes/a.hip")])
+
+
+def test_lock_acquire_held_check_is_exact_elsewhere(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(locks_module, "CASE_INSENSITIVE", False)
+    runner = FakeRunner((0, "Lock acquired on files:\nscenes/A.HIP\n"))
+    with pytest.raises(LockNotAcquired):
+        make(tmp_path, runner).lock_acquire([Path("scenes/a.hip")])

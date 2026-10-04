@@ -19,7 +19,8 @@ _ON_BRANCH = re.compile(r"^On branch (?P<branch>\S+) revision (?P<rev>\d+) -> (?
 _REMOTE_REVISION = re.compile(r"^Remote revision (?P<rev>\d+) -> (?P<sig>[0-9a-f]+)$")
 _CHANGE = re.compile(r"^(?P<code>[MAD]) (?P<path>.+)$")
 _LOCK = re.compile(r"^(?P<path>.+) by (?P<owner>.+?) on branch (?P<branch>\S+)$")
-
+_BRANCH = re.compile(r"^Branch (?P<name>\S.*)$")
+BRANCH_INFO_KEYS = ("ID", "Latest", "Remote Latest", "Creator", "Created")
 
 
 class RemoteState(Enum):
@@ -36,6 +37,10 @@ _REMOTE_NOTES = {
     "Local branch is behind remote": RemoteState.BEHIND,
     "Local branch has diverged, synchronize to merge": RemoteState.DIVERGED,
 }
+
+FILE_INFO_KEYS = ("Path", "Type", "Size", "Mode", "Context", "Hash", "Status")
+FILE_STATUS_TRACKED = frozenset({"-", "Modified", "Deleted"})
+FILE_STATUS_VALUES = FILE_STATUS_TRACKED | {"Added"}
 
 LOCK_HELD_HEADERS = ("Lock acquired on files:", "Lock already owned on files:")
 
@@ -97,6 +102,55 @@ class AuthInfo:
 
     user_id: str
     name: str
+
+
+@dataclass(frozen=True)
+class FileInfo:
+    """One block of `lore file info` output.
+
+    Attributes:
+        path: Repo-relative path as Lore printed it.
+        type: `file` or `dir`, as printed.
+        size: Size in bytes.
+        mode: The `Mode` value, as printed.
+        context: The `Context` value, as printed.
+        hash: The `Hash` value; all zeros for a file Lore does not track.
+        status: `-` (tracked, clean), `Modified`, `Deleted` or `Added` (not tracked).
+    """
+
+    path: str
+    type: str
+    size: int
+    mode: str
+    context: str
+    hash: str
+    status: str
+
+    @property
+    def tracked(self) -> bool:
+        """True when the current revision has the file."""
+        return self.status in FILE_STATUS_TRACKED
+
+
+@dataclass(frozen=True)
+class BranchInfo:
+    """Parsed `lore branch info` output.
+
+    Attributes:
+        name: The branch name.
+        id: The branch ID, as lock records print it.
+        latest: The latest local revision signature, if printed.
+        remote_latest: The latest remote revision signature, if printed.
+        creator: Who created the branch, if printed.
+        created: When the branch was created, as printed.
+    """
+
+    name: str
+    id: str
+    latest: str | None
+    remote_latest: str | None
+    creator: str | None
+    created: str | None
 
 
 def parse_version(text: str) -> tuple[int, int, int]:
@@ -169,6 +223,35 @@ def parse_auth_info(text: str) -> AuthInfo:
     return AuthInfo(user_id=fields["ID"], name=fields["Name"])
 
 
+def parse_branch_info(text: str) -> BranchInfo:
+    """Parse `lore branch info` output for the current branch.
+
+    The first line is `Branch <name>`; the rest are indented `Key: value`
+    lines. Keys other than ID, Latest, Remote Latest, Creator and Created
+    raise, and so does a missing ID.
+    """
+    lines = [line.strip() for line in text.splitlines() if line.strip()]
+    match = _BRANCH.match(lines[0]) if lines else None
+    if not match:
+        raise LoreOutputError("lore branch info did not start with 'Branch <name>'", text)
+    fields: dict[str, str] = {}
+    for line in lines[1:]:
+        key, sep, value = line.partition(":")
+        if not sep or key not in BRANCH_INFO_KEYS or key in fields:
+            raise LoreOutputError(f"Unrecognised lore branch info line: {line!r}", text)
+        fields[key] = value.strip()
+    if not fields.get("ID"):
+        raise LoreOutputError("lore branch info is missing ID", text)
+    return BranchInfo(
+        name=match["name"].strip(),
+        id=fields["ID"],
+        latest=fields.get("Latest"),
+        remote_latest=fields.get("Remote Latest"),
+        creator=fields.get("Creator"),
+        created=fields.get("Created"),
+    )
+
+
 def parse_lock_query(text: str) -> tuple[LockRecord, ...]:
     """Parse `lore lock query` output.
 
@@ -206,3 +289,48 @@ def parse_lock_acquire(text: str) -> frozenset[str]:
             raise LoreOutputError(f"Unrecognised lore lock acquire line: {line!r}", text)
         held.add(stripped)
     return frozenset(held)
+
+
+def parse_file_info(text: str) -> dict[str, FileInfo]:
+    """Parse `lore file info` output into blocks keyed by repo-relative path.
+
+    Lore prints one block per path that exists on disk, in no fixed order, and
+    nothing for a path that does not exist. Unknown keys or Status values raise.
+    """
+    infos: dict[str, FileInfo] = {}
+    block: dict[str, str] = {}
+
+    def close() -> None:
+        if not block:
+            return
+        missing = [key for key in FILE_INFO_KEYS if key not in block]
+        if missing:
+            raise LoreOutputError(f"lore file info block for {block['Path']!r} lacks {missing}", text)
+        if block["Status"] not in FILE_STATUS_VALUES:
+            raise LoreOutputError(f"Unknown lore file info Status: {block['Status']!r}", text)
+        if not block["Size"].isdigit():
+            raise LoreOutputError(f"Unrecognised lore file info Size: {block['Size']!r}", text)
+        infos[block["Path"]] = FileInfo(
+            path=block["Path"],
+            type=block["Type"],
+            size=int(block["Size"]),
+            mode=block["Mode"],
+            context=block["Context"],
+            hash=block["Hash"],
+            status=block["Status"],
+        )
+        block.clear()
+
+    for line in text.splitlines():
+        if not line.strip():
+            continue
+        key, sep, value = line.strip().partition(":")
+        if not sep or key not in FILE_INFO_KEYS:
+            raise LoreOutputError(f"Unrecognised lore file info line: {line!r}", text)
+        if key == "Path":
+            close()
+        elif not block or key in block:
+            raise LoreOutputError(f"Unexpected lore file info line: {line!r}", text)
+        block[key] = value.strip()
+    close()
+    return infos

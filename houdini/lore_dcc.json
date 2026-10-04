@@ -1,0 +1,7 @@
+{
+    "enable": "houdini_version >= '22.0'",
+    "hpath": "$HOUDINI_PACKAGE_PATH",
+    "env": [
+        { "LORE_DCC_PYTHON": "$HOUDINI_PACKAGE_PATH/../python" }
+    ]
+}

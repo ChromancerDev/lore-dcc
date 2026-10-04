@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<shelfDocument>
+  <toolshelf name="lore" label="Lore">
+    <memberTool name="lore_info"/>
+    <memberTool name="lore_toggle_enabled"/>
+    <memberTool name="lore_lock"/>
+    <memberTool name="lore_discard"/>
+    <memberTool name="lore_collect_outputs"/>
+    <memberTool name="lore_commit"/>
+  </toolshelf>
+
+  <tool name="lore_info" label="Info" icon="BUTTONS_info">
+    <helpText><![CDATA[Show the working copy, branch, identity and remote of the open file.]]></helpText>
+    <script scriptType="python"><![CDATA[from lore_dcc.houdini import actions
+actions.info()]]></script>
+  </tool>
+
+  <tool name="lore_toggle_enabled" label="Enable/Disable" icon="MISC_checkmark">
+    <helpText><![CDATA[Turn the Lore save hooks on or off for this user.]]></helpText>
+    <script scriptType="python"><![CDATA[from lore_dcc.houdini import actions
+actions.toggle_enabled()]]></script>
+  </tool>
+
+  <tool name="lore_lock" label="Lock" icon="BUTTONS_lock_closed">
+    <helpText><![CDATA[Lock the open file so only you can change it. A new file is locked and staged. Perforce: add or check out.]]></helpText>
+    <script scriptType="python"><![CDATA[from lore_dcc.houdini import actions
+actions.lock()]]></script>
+  </tool>
+
+  <tool name="lore_discard" label="Discard changes" icon="BUTTONS_revert">
+    <helpText><![CDATA[Reset the open file to the committed version, release your lock and reload it. Perforce: revert.]]></helpText>
+    <script scriptType="python"><![CDATA[from lore_dcc.houdini import actions
+actions.discard()]]></script>
+  </tool>
+
+  <tool name="lore_collect_outputs" label="Collect Outputs" icon="COMMON_archive">
+    <helpText><![CDATA[Find the files this scene writes, stage new ones, keep locks on changed ones and release unchanged ones. Perforce: checkout dependencies.]]></helpText>
+    <script scriptType="python"><![CDATA[from lore_dcc.houdini import actions
+actions.collect_outputs()]]></script>
+  </tool>
+
+  <tool name="lore_commit" label="Commit" icon="BUTTONS_upload">
+    <helpText><![CDATA[Commit your changes and push them. Perforce: submit.]]></helpText>
+    <script scriptType="python"><![CDATA[from lore_dcc.houdini import actions
+actions.commit()]]></script>
+  </tool>
+</shelfDocument>

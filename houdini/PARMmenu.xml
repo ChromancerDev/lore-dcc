@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<menuDocument>
+  <menu>
+    <subMenu id="parmmenu.lore_menu">
+      <label>Lore</label>
+      <insertAtIndex>7</insertAtIndex>
+      <context>
+        <expression>
+import hou
+if not kwargs["parms"]:
+    return 0
+return int(kwargs["parms"][0].parmTemplate().type() == hou.parmTemplateType.String)
+        </expression>
+      </context>
+
+      <scriptItem id="parmmenu.lore_lock_file">
+        <label>Lock</label>
+        <scriptCode><![CDATA[from lore_dcc.houdini import actions
+actions.lock_parm_file(kwargs["parms"][0])]]></scriptCode>
+      </scriptItem>
+
+      <scriptItem id="parmmenu.lore_discard_file">
+        <label>Discard changes</label>
+        <scriptCode><![CDATA[from lore_dcc.houdini import actions
+actions.discard_parm_file(kwargs["parms"][0])]]></scriptCode>
+      </scriptItem>
+    </subMenu>
+  </menu>
+</menuDocument>

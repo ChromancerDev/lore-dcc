@@ -21,7 +21,7 @@ from lore_dcc.errors import (
     LoreNotFound,
     LoreVersionError,
 )
-from lore_dcc.locks import LockRecord
+from lore_dcc.locks import LockRecord, path_key
 
 logger = logging.getLogger(__name__)
 
@@ -126,7 +126,8 @@ class LoreCli:
             outputs.append(output)
             held |= parsers.parse_lock_acquire(output)
         wanted = [Path(p).relative_to(self.root).as_posix() for p in self._absolute(paths)]
-        missing = [p for p in wanted if p not in held]
+        held_keys = {path_key(p) for p in held}
+        missing = [p for p in wanted if path_key(p) not in held_keys]
         if missing:
             raise LockNotAcquired(missing, "\n".join(outputs))
 
@@ -145,6 +146,21 @@ class LoreCli:
     def auth_info(self) -> parsers.AuthInfo:
         """Return the signed-in user."""
         return parsers.parse_auth_info(self._run_once(["auth", "info"]))
+
+    def branch_info(self) -> parsers.BranchInfo:
+        """Return the current branch, including its ID."""
+        return parsers.parse_branch_info(self._run_once(["branch", "info"]))
+
+    def file_info(self, paths: Sequence[Path]) -> dict[str, parsers.FileInfo]:
+        """Return `lore file info` blocks keyed by repo-relative path.
+
+        A path that does not exist on disk has no entry. Returns an empty dict
+        without running Lore when `paths` is empty.
+        """
+        infos: dict[str, parsers.FileInfo] = {}
+        for batch in self._batches(paths):
+            infos.update(parsers.parse_file_info(self._run_once(["file", "info", *batch])))
+        return infos
 
     def _absolute(self, paths: Sequence[Path]) -> list[str]:
         return [str((self.root / p).resolve()) for p in paths]

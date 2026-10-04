@@ -8,10 +8,22 @@ from __future__ import annotations
 
 import os
 import stat
+import sys
 from collections.abc import Iterable
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
+
+CASE_INSENSITIVE = sys.platform == "win32"
+
+
+def path_key(path: str) -> str:
+    """Return the form of a repo-relative path to compare on this platform.
+
+    Windows paths compare case-insensitively. Keep Lore's own spelling for
+    display and results; use the key only for matching.
+    """
+    return path.casefold() if CASE_INSENSITIVE else path
 
 
 class LockState(Enum):
@@ -58,23 +70,50 @@ class Identity:
         return owner.strip() in self.names
 
 
-def classify(path: str, locks: Iterable[LockRecord] | None, me: Identity) -> LockState:
+def find_lock(
+    path: str, locks: Iterable[LockRecord], branch_id: str | None = None
+) -> LockRecord | None:
+    """Return the first lock record for a path on the current branch, or None.
+
+    Args:
+        path: Repo-relative path with forward slashes.
+        locks: Records from a successful lock query.
+        branch_id: The current branch ID. When given, records whose branch is
+            set and differs are ignored.
+    """
+    key = path_key(path)
+    for lock in locks:
+        if path_key(lock.path) != key:
+            continue
+        if branch_id is not None and lock.branch is not None and lock.branch != branch_id:
+            continue
+        return lock
+    return None
+
+
+def classify(
+    path: str,
+    locks: Iterable[LockRecord] | None,
+    me: Identity,
+    branch_id: str | None = None,
+) -> LockState:
     """Return the lock state of a repo-relative path.
 
     Args:
         path: Repo-relative path with forward slashes.
         locks: Every lock from a successful query, or None if the query failed.
         me: The current user's identity.
+        branch_id: The current branch ID; locks held on other branches are
+            ignored when given.
     """
     if locks is None:
         return LockState.UNKNOWN
-    for lock in locks:
-        if lock.path != path:
-            continue
-        if not lock.owner.strip() or lock.owner.strip() == "<unknown>":
-            return LockState.UNKNOWN
-        return LockState.LOCKED_BY_ME if me.owns(lock.owner) else LockState.LOCKED_BY_OTHER
-    return LockState.NOT_LOCKED
+    lock = find_lock(path, locks, branch_id)
+    if lock is None:
+        return LockState.NOT_LOCKED
+    if not lock.owner.strip() or lock.owner.strip() == "<unknown>":
+        return LockState.UNKNOWN
+    return LockState.LOCKED_BY_ME if me.owns(lock.owner) else LockState.LOCKED_BY_OTHER
 
 
 def wanted_read_only(state: LockState, *, tracked: bool, lockable: bool) -> bool | None:

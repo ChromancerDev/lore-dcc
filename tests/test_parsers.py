@@ -191,3 +191,113 @@ def test_lock_acquire_new_and_already_owned() -> None:
 def test_lock_acquire_fails_closed(text: str) -> None:
     with pytest.raises(LoreOutputError):
         parsers.parse_lock_acquire(text)
+
+
+FILE_INFO = """\
+Path:    source/test/cube/Cube.hiplc
+Type:    file
+Size:    0
+Mode:    000
+Context: 00000000000000000000000000000000
+Hash:    0000000000000000000000000000000000000000000000000000000000000000
+Status:  Added
+Path:    README.md
+Type:    file
+Size:    1080
+Mode:    000
+Context: 01a01c8a97967810943481d293b74f25
+Hash:    b37fad19aeb151fccdc56c5efbaa05b5b69b3dd74124ece75b9a530f2f646e47
+Status:  -
+Path:    source
+Type:    dir
+Size:    0
+Mode:    000
+Context: 01a01c8a97967810943481d293b74f25
+Hash:    b37fad19aeb151fccdc56c5efbaa05b5b69b3dd74124ece75b9a530f2f646e47
+Status:  Modified
+"""
+
+
+def test_file_info_blocks_keyed_by_path() -> None:
+    infos = parsers.parse_file_info(FILE_INFO)
+    assert list(infos) == ["source/test/cube/Cube.hiplc", "README.md", "source"]
+    new = infos["source/test/cube/Cube.hiplc"]
+    assert (new.status, new.tracked, new.size, new.type) == ("Added", False, 0, "file")
+    assert new.hash == "0" * 64
+    readme = infos["README.md"]
+    assert (readme.status, readme.tracked, readme.size) == ("-", True, 1080)
+    assert readme.context == "01a01c8a97967810943481d293b74f25"
+    assert infos["source"].type == "dir"
+    assert infos["source"].tracked
+
+
+@pytest.mark.parametrize("status", ["-", "Modified", "Deleted"])
+def test_file_info_tracked_statuses(status: str) -> None:
+    block = FILE_INFO.split("Path:    README.md")[1].split("Path:    source")[0]
+    text = "Path:    README.md" + block.replace("Status:  -", f"Status:  {status}")
+    assert parsers.parse_file_info(text)["README.md"].tracked
+
+
+def test_file_info_empty_output_is_no_blocks() -> None:
+    assert parsers.parse_file_info("") == {}
+    assert parsers.parse_file_info("\n\n") == {}
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        FILE_INFO.replace("Status:  Added", "Status:  Ignored"),
+        FILE_INFO.replace("Mode:    000", "Perms:   000", 1),
+        FILE_INFO.replace("Size:    0\n", "Size:    big\n", 1),
+        FILE_INFO.replace("Size:    1080\n", "", 1),
+        "Type:    file\n" + FILE_INFO,
+        "Path:    a\nPath:    b\n",
+        FILE_INFO.replace("Status:  Added\n", "Status:  Added\nStatus:  Added\n", 1),
+        "not a block\n",
+    ],
+)
+def test_file_info_fails_closed(text: str) -> None:
+    with pytest.raises(LoreOutputError):
+        parsers.parse_file_info(text)
+
+
+BRANCH_INFO = """\
+Branch main
+  ID: e726318bbc3fd75ac8733a7e030cc35b
+  Latest: af62673685f70eb75c7018884116c9c7efa09cf395d929864698b77f27ee2843
+  Remote Latest: af62673685f70eb75c7018884116c9c7efa09cf395d929864698b77f27ee2843
+  Creator: artist@example.com
+  Created: Thu, 20 Aug 2026 00:18:59 +0000
+"""
+
+
+def test_branch_info() -> None:
+    info = parsers.parse_branch_info(BRANCH_INFO)
+    assert (info.name, info.id) == ("main", "e726318bbc3fd75ac8733a7e030cc35b")
+    assert info.latest == info.remote_latest == "af62673685f70eb75c7018884116c9c7efa09cf395d929864698b77f27ee2843"
+    assert (info.creator, info.created) == ("artist@example.com", "Thu, 20 Aug 2026 00:18:59 +0000")
+
+
+def test_branch_info_optional_keys_may_be_absent() -> None:
+    info = parsers.parse_branch_info("Branch feature one\n  ID: ab12\n")
+    assert (info.name, info.id, info.latest, info.remote_latest) == ("feature one", "ab12", None, None)
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "",
+        "No branch\n",
+        "  ID: ab12\n",
+        "Branch\n  ID: ab12\n",
+        "Branch main\n",
+        "Branch main\n  Latest: ab\n",
+        "Branch main\n  ID: ab12\n  Owner: me\n",
+        "Branch main\n  ID: ab12\n  ID: cd34\n",
+        "Branch main\n  ID: ab12\n  garbage\n",
+        "Branch main\n  ID:\n",
+    ],
+)
+def test_branch_info_fails_closed(text: str) -> None:
+    with pytest.raises(LoreOutputError):
+        parsers.parse_branch_info(text)

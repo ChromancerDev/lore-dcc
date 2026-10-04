@@ -126,3 +126,54 @@ def test_set_read_only_round_trip(tmp_path: Path) -> None:
     assert not locks.set_read_only(path, True)
     assert locks.set_read_only(path, False)
     assert os.stat(path).st_mode & stat.S_IWRITE
+
+
+def test_houdini_block_is_stored_raw(tmp_path: Path) -> None:
+    block = {"outputs": [{"node": "filecache", "parm": "file"}], "anything": [1, {"a": None}]}
+    (tmp_path / "lore-dcc.json").write_text(
+        json.dumps({"version": 1, "houdini": block}), encoding="utf-8"
+    )
+    loaded = settings.load_settings(tmp_path)
+    assert loaded.houdini == block
+    assert loaded.is_lockable("a.hip")
+
+
+def test_houdini_defaults_to_empty_dict(tmp_path: Path) -> None:
+    assert settings.load_settings(tmp_path).houdini == {}
+    assert settings.parse_settings({"version": 1}).houdini == {}
+
+
+@pytest.mark.parametrize("value", [[], "x", 3, None])
+def test_houdini_must_be_an_object(value: object) -> None:
+    with pytest.raises(SettingsError, match="houdini must be an object"):
+        settings.parse_settings({"version": 1, "houdini": value})
+
+
+def test_unknown_keys_still_rejected_next_to_houdini() -> None:
+    with pytest.raises(SettingsError, match="unknown keys"):
+        settings.parse_settings({"version": 1, "houdini": {}, "blender": {}})
+
+
+def test_classify_ignores_locks_on_other_branches() -> None:
+    records = (
+        LockRecord("a.hip", "user:999", "other"),
+        LockRecord("b.hip", "user:999", "other"),
+        LockRecord("b.hip", "user:123", "main"),
+        LockRecord("c.hip", "user:999", None),
+    )
+    assert locks.classify("a.hip", records, ME, "main") is LockState.NOT_LOCKED
+    assert locks.classify("b.hip", records, ME, "main") is LockState.LOCKED_BY_ME
+    assert locks.classify("c.hip", records, ME, "main") is LockState.LOCKED_BY_OTHER
+    assert locks.classify("a.hip", records, ME) is LockState.LOCKED_BY_OTHER
+
+
+def test_classify_compares_paths_case_insensitively_only_on_windows(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    records = (LockRecord("Scenes/Shot.hip", "user:999", "main"),)
+    monkeypatch.setattr(locks, "CASE_INSENSITIVE", True)
+    assert locks.classify("scenes/shot.HIP", records, ME) is LockState.LOCKED_BY_OTHER
+    assert locks.path_key("A/B.hip") == "a/b.hip"
+    monkeypatch.setattr(locks, "CASE_INSENSITIVE", False)
+    assert locks.classify("scenes/shot.HIP", records, ME) is LockState.NOT_LOCKED
+    assert locks.path_key("A/B.hip") == "A/B.hip"
