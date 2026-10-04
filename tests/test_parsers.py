@@ -246,6 +246,31 @@ def test_file_info_tracked_statuses(status: str) -> None:
     assert parsers.parse_file_info(text)["README.md"].tracked
 
 
+FILE_INFO_LINKED = """\
+Path:    ldspike/scene.hip
+Type:    file
+Size:    7
+Mode:    000
+Context: 01a106e8c48f7370be0fb0e18a01443f
+Hash:    0364ad8ccdc3d4d7cfdec266e9882986645ad54c8f98c55fb422a40b81716495
+Status:  -
+Path:    ldspike/geo/rock.bgeo
+Type:    file
+Size:    7
+Mode:    000
+Context: 01a106e8c48f7370be0fb0f3a3e48108
+Hash:    035be4619acfb1ee79157be3350e4da6671772c822a24a1da831899a58738248
+Status:  -
+dependencies: <52 bytes>
+dependents: <34 bytes>
+"""
+
+
+def test_file_info_skips_link_size_lines() -> None:
+    infos = parsers.parse_file_info(FILE_INFO_LINKED)
+    assert list(infos) == ["ldspike/scene.hip", "ldspike/geo/rock.bgeo"]
+
+
 def test_file_info_empty_output_is_no_blocks() -> None:
     assert parsers.parse_file_info("") == {}
     assert parsers.parse_file_info("\n\n") == {}
@@ -262,6 +287,7 @@ def test_file_info_empty_output_is_no_blocks() -> None:
         "Path:    a\nPath:    b\n",
         FILE_INFO.replace("Status:  Added\n", "Status:  Added\nStatus:  Added\n", 1),
         "not a block\n",
+        FILE_INFO_LINKED.replace("<34 bytes>", "34 bytes"),
     ],
 )
 def test_file_info_fails_closed(text: str) -> None:

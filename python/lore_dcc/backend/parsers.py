@@ -45,6 +45,7 @@ _REMOTE_NOTES = {
 FILE_INFO_KEYS = ("Path", "Type", "Size", "Mode", "Context", "Hash", "Status")
 FILE_STATUS_TRACKED = frozenset({"-", "Modified", "Deleted"})
 FILE_STATUS_VALUES = FILE_STATUS_TRACKED | {"Added"}
+_LINK_SIZE = re.compile(r"^(dependencies|dependents):\s+<\d+ bytes>$")
 
 NO_CHANGES_LINE = "No tracked changes"
 
@@ -315,6 +316,9 @@ def parse_file_info(text: str) -> dict[str, FileInfo]:
 
     Lore prints one block per path that exists on disk, in no fixed order, and
     nothing for a path that does not exist. Unknown keys or Status values raise.
+    Files with dependency links add `dependencies: <N bytes>` and `dependents:
+    <N bytes>` lines, which a batch prints after the last block, so they are
+    skipped.
     """
     infos: dict[str, FileInfo] = {}
     block: dict[str, str] = {}
@@ -333,7 +337,7 @@ def parse_file_info(text: str) -> dict[str, FileInfo]:
         block.clear()
 
     for line in text.splitlines():
-        if not line.strip():
+        if not line.strip() or _LINK_SIZE.match(line.strip()):
             continue
         key, sep, value = line.strip().partition(":")
         if not sep or key not in FILE_INFO_KEYS:
