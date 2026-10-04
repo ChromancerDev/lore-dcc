@@ -368,6 +368,10 @@ def _scene_behind_text(report: BehindReport, edited: bool) -> str:
             "Continue syncs only the references. "
             "Sync and reopen also syncs the scene and reopens it."
         )
+    parts.append(
+        "After Continue, Lore counts this scene as up to date and you will not be warned again. "
+        "Use Discard changes to get the server version."
+    )
     return "\n\n".join(parts)
 
 
