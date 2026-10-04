@@ -49,8 +49,8 @@ actions.discard_hda(kwargs["node"])]]></scriptCode>
         <context>
           <expression>
 try:
-    from lore_dcc.houdini import actions
-    return int(actions.node_is_output(kwargs["node"]))
+    from lore_dcc.houdini import outputs
+    return int(outputs.is_output_node(kwargs["node"]))
 except Exception:
     return 0
           </expression>
@@ -64,8 +64,8 @@ actions.lock_node_outputs(kwargs["node"])]]></scriptCode>
         <context>
           <expression>
 try:
-    from lore_dcc.houdini import actions
-    return int(actions.node_is_output(kwargs["node"]))
+    from lore_dcc.houdini import outputs
+    return int(outputs.is_output_node(kwargs["node"]))
 except Exception:
     return 0
           </expression>

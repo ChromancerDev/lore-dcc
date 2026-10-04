@@ -12,7 +12,7 @@ pytest.importorskip("PySide6")
 from lore_dcc import prefs, ui
 from lore_dcc.backend.parsers import Change, Status
 from lore_dcc.errors import LoreCommandError
-from lore_dcc.locks import Identity, LockState
+from lore_dcc.locks import LockState
 from lore_dcc.session import CommitBlocked, CommitResult, FileState
 from lore_dcc.ui import dialogs
 from PySide6 import QtCore, QtWidgets
@@ -48,7 +48,6 @@ def state(path, lock=LockState.NOT_LOCKED, owner=None) -> FileState:
 
 def outcome(**kw) -> CommitResult:
     base = {
-        "committed": True,
         "pushed": True,
         "diverged": False,
         "push_error": None,
@@ -96,11 +95,6 @@ class FakeSession:
     def file_states(self, paths):
         wanted = set(paths)
         return [s for s in self._states if s.path in wanted]
-
-    def identity(self):
-        if self.lore.fail_auth:
-            raise LoreCommandError("auth failed", ["lore", "auth", "info"], 1, "not logged in")
-        return Identity.of("u1", "Ben")
 
     def commit(self, include, summary, description="", push=True, keep_locked=False):
         self.commit_calls.append((list(include), summary, description, push, keep_locked))
@@ -208,17 +202,6 @@ def test_option_defaults_come_from_prefs(qapp) -> None:
         "Commit records a revision locally. Push sends it to the server. "
         "Together they are what Perforce calls Submit."
     )
-
-
-def test_prefs_loaded_from_registered_folder(qapp, monkeypatch, tmp_path) -> None:
-    assert dialogs._load_prefs() == prefs.Prefs()
-    seen = []
-    monkeypatch.setattr(
-        prefs, "load_prefs", lambda folder: seen.append(folder) or prefs.Prefs(keep_files_locked=True)
-    )
-    ui.set_prefs_folder(tmp_path)
-    assert dialogs._load_prefs().keep_files_locked is True
-    assert seen == [tmp_path]
 
 
 def test_labels_use_lore_words_only(qapp) -> None:
@@ -349,12 +332,22 @@ def test_show_commit_returns_local_result_when_closed_after_push_failure(
 
     monkeypatch.setattr(dialogs._CommitDialog, "exec", fake_exec)
     result = dialogs.show_commit(session)
-    assert result is not None and result.committed and not result.pushed
+    assert result is not None and not result.pushed
 
 
 def test_show_commit_cancel_returns_none(qapp, monkeypatch) -> None:
     monkeypatch.setattr(dialogs._CommitDialog, "exec", lambda self: self.cancel_button.click() or 0)
     assert dialogs.show_commit(FakeSession()) is None
+
+
+def test_show_commit_takes_option_defaults_from_the_prefs_argument(qapp, monkeypatch) -> None:
+    pushes = []
+    monkeypatch.setattr(
+        dialogs._CommitDialog, "exec", lambda self: pushes.append(self.push_box.isChecked()) or 0
+    )
+    dialogs.show_commit(FakeSession(), prefs.Prefs(push_after_commit=False))
+    dialogs.show_commit(FakeSession())
+    assert pushes == [False, True]
 
 
 def test_show_commit_with_no_changes_says_so(qapp, monkeypatch, shown) -> None:

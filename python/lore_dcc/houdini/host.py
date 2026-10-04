@@ -32,10 +32,9 @@ def prefs_folder() -> Path:
 
 
 def setup() -> None:
-    """Point the shared UI at Houdini's main window and prefs folder."""
+    """Point the shared UI at Houdini's main window."""
     from lore_dcc import ui
 
-    ui.set_prefs_folder(prefs_folder())
     if has_ui():
         ui.set_parent_provider(lambda: hou.qt.mainWindow())
 
@@ -70,7 +69,7 @@ def session_for(path: Path | str) -> Session:
         LoreError: Lore is missing or too old.
     """
     session = run(session_module.session_for, path)
-    outputs.remember_overrides(getattr(session.settings, "houdini", None))
+    outputs.remember_overrides(session.settings.houdini)
     return session
 
 

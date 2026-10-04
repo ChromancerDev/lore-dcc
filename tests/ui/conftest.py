@@ -15,9 +15,8 @@ def qapp():
 
 @pytest.fixture(autouse=True)
 def _reset_ui_globals():
-    """Restore the module-level provider and prefs folder after each test."""
+    """Restore the module-level parent provider after each test."""
     from lore_dcc import ui
 
     yield
     ui._parent_provider = None
-    ui._prefs_folder = None

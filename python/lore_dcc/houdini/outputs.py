@@ -1,4 +1,4 @@
-"""Find the files a scene writes: the output node table, frame lists and the scene scan.
+"""Find the files a scene writes: the output node table, frame ranges and the scene scan.
 
 The table, frame and path logic is pure Python. `hou` is imported only by the
 functions that read a node.
@@ -10,7 +10,7 @@ import logging
 import os
 import re
 from collections.abc import Callable, Iterable, Mapping, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -125,46 +125,31 @@ def parse_overrides(raw: object) -> dict[str, OutputSpec]:
     return table
 
 
-@dataclass(frozen=True)
-class OutputTable:
-    """Default output nodes plus the repo's overrides.
+def find_spec(overrides: Mapping[str, OutputSpec], name_with_category: str) -> OutputSpec | None:
+    """Return the spec for a node type such as `Sop/filecache::2.0`, or None.
 
-    Attributes:
-        overrides: Entries from lore-dcc.json. They win over the defaults for
-            any node type they match and replace that default entry whole.
+    Entries in `overrides` win over the defaults for any node type they match
+    and replace that default entry whole.
     """
-
-    overrides: Mapping[str, OutputSpec] = field(default_factory=dict)
-
-    def find(self, name_with_category: str) -> OutputSpec | None:
-        """Return the spec for a node type such as `Sop/filecache::2.0`, or None."""
-        keys = table_keys(name_with_category)
-        for table in (self.overrides, DEFAULT_OUTPUTS):
-            for key in keys:
-                if key in table:
-                    return table[key]
-        return None
+    keys = table_keys(name_with_category)
+    for table in (overrides, DEFAULT_OUTPUTS):
+        for key in keys:
+            if key in table:
+                return table[key]
+    return None
 
 
-def frame_list(start: float, end: float, step: float) -> list[float]:
-    """Return the frames a range renders: start, start+step, ... up to end.
+def frame_range(start: float, end: float, step: float) -> tuple[list[float], int]:
+    """Return the frames a range renders and how many it holds before the cap.
 
-    A step of zero or less counts as 1. An empty range gives an empty list. A
-    range of more than 100,000 frames is cut to its first 100,000.
+    The frames are start, start+step, ... up to end. A step of zero or less
+    counts as 1. An empty range gives no frames. A range of more than 100,000
+    frames is cut to its first 100,000; the second value is the uncut count.
     """
     if step <= 0:
         step = 1.0
-    count = min(frame_count(start, end, step), _MAX_FRAMES)
-    return [start + i * step for i in range(count)]
-
-
-def frame_count(start: float, end: float, step: float) -> int:
-    """Return how many frames a range holds before the cap that frame_list applies."""
-    if step <= 0:
-        step = 1.0
-    if end < start:
-        return 0
-    return int((end - start) / step + 1e-6) + 1
+    total = int((end - start) / step + 1e-6) + 1 if end >= start else 0
+    return [start + i * step for i in range(min(total, _MAX_FRAMES))], total
 
 
 def when_matches(
@@ -219,20 +204,19 @@ def remember_overrides(houdini_settings: Mapping[str, Any] | None) -> None:
     """Keep a working copy's overrides so node menus can show for its output nodes."""
     global _remembered
     try:
-        _remembered = parse_overrides((houdini_settings or {}).get("outputs"))
+        _remembered = _overrides(houdini_settings)
     except SettingsError as exc:
         logger.warning("%s", exc)
         _remembered = {}
 
 
-def _table_for(session: Session) -> OutputTable:
-    houdini = getattr(session.settings, "houdini", None) or {}
-    return OutputTable(parse_overrides(houdini.get("outputs")))
+def _overrides(houdini_settings: Mapping[str, Any] | None) -> dict[str, OutputSpec]:
+    return parse_overrides((houdini_settings or {}).get("outputs"))
 
 
 def is_output_node(node: Any) -> bool:
     """Return True when the node's type is in the output table (menus use this)."""
-    return OutputTable(_remembered).find(node.type().nameWithCategory()) is not None
+    return find_spec(_remembered, node.type().nameWithCategory()) is not None
 
 
 def _node_frames(node: Any, current: float, notes: list[str] | None = None) -> list[float]:
@@ -243,7 +227,7 @@ def _node_frames(node: Any, current: float, notes: list[str] | None = None) -> l
     if f1 is None or f2 is None:
         return [current]
     start, end, step = f1.eval(), f2.eval(), f3.eval() if f3 is not None else 1.0
-    total = frame_count(start, end, step)
+    frames, total = frame_range(start, end, step)
     if total > _MAX_FRAMES:
         note = (
             f"{node.path()} renders {total:,} frames; only the first {_MAX_FRAMES:,} "
@@ -252,7 +236,7 @@ def _node_frames(node: Any, current: float, notes: list[str] | None = None) -> l
         logger.warning("%s", note)
         if notes is not None:
             notes.append(note)
-    return frame_list(start, end, step)
+    return frames
 
 
 def _read_parm(node: Any, name: str, as_token: bool) -> object:
@@ -300,7 +284,8 @@ def outputs_for_node(
     Raises:
         SettingsError: The repo's output table is malformed.
     """
-    spec = _table_for(session).find(node.type().nameWithCategory())
+    overrides = _overrides(session.settings.houdini)
+    spec = find_spec(overrides, node.type().nameWithCategory())
     return node_outputs(node, spec, session.workspace.root, notes) if spec else []
 
 
@@ -314,10 +299,10 @@ def scan_scene(session: Session, notes: list[str] | None = None) -> list[Path]:
     """
     import hou
 
-    table = _table_for(session)
+    overrides = _overrides(session.settings.houdini)
     found: dict[Path, None] = {}
     for node in hou.node("/").allSubChildren():
-        spec = table.find(node.type().nameWithCategory())
+        spec = find_spec(overrides, node.type().nameWithCategory())
         if spec:
             found.update(dict.fromkeys(node_outputs(node, spec, session.workspace.root, notes)))
     return list(found)

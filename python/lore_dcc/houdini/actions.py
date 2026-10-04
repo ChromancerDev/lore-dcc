@@ -119,14 +119,9 @@ def node_has_library(node: Any) -> bool:
     return _library_file(node) is not None
 
 
-def node_is_output(node: Any) -> bool:
-    """Return True when the node's type is in the output table."""
-    return outputs.is_output_node(node)
-
-
 def node_menu_visible(node: Any) -> bool:
     """Return True when the Lore node menu has an entry for this node."""
-    return node_has_library(node) or node_is_output(node)
+    return node_has_library(node) or outputs.is_output_node(node)
 
 
 @_reported
@@ -187,7 +182,7 @@ def commit() -> None:
 
     session = _session(_hip())
     if session:
-        dialogs.show_commit(session)
+        dialogs.show_commit(session, host.load_prefs())
 
 
 @_reported

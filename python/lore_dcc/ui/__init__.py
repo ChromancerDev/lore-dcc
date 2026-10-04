@@ -7,7 +7,6 @@ main window. Nothing in this package imports a DCC module.
 from __future__ import annotations
 
 from collections.abc import Callable
-from pathlib import Path
 from typing import Any
 
 TITLE_PREFIX = "Lore - "
@@ -37,17 +36,3 @@ def set_parent_provider(provider: Callable[[], Any]) -> None:
 def parent_window() -> Any:
     """Return the host main window, or None when no provider is set."""
     return _parent_provider() if _parent_provider else None
-
-
-_prefs_folder: Path | None = None
-
-
-def set_prefs_folder(path: Path | str | None) -> None:
-    """Register the folder the dialogs read `prefs.load_prefs` from, or None for defaults."""
-    global _prefs_folder
-    _prefs_folder = Path(path) if path else None
-
-
-def prefs_folder() -> Path | None:
-    """Return the registered prefs folder, or None when none is set."""
-    return _prefs_folder

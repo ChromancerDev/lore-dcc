@@ -513,9 +513,7 @@ def test_commit_stages_unstages_others_commits_pushes_and_releases(env: Env) -> 
     assert env.runner.calls("unstage") == [["extra.hip", "newdir"]]
     assert env.runner.calls("commit") == [["Fix it\n\nMore detail."]]
     assert env.runner.calls("lock release") == [["a.hip"]]
-    assert (result.committed, result.pushed, result.diverged, result.push_error) == (
-        True, True, False, None,
-    )  # fmt: skip
+    assert (result.pushed, result.diverged, result.push_error) == (True, False, None)
     assert "Commit succeeded" in result.output
     assert "Pushed revision 4" in result.output
     assert (result.revision, result.pushed_revision, result.branch) == (4, 4, "main")
@@ -549,7 +547,7 @@ def test_commit_without_push_keeps_locks(env: Env) -> None:
     env.runner.info = {"a.hip": "Modified"}
     env.runner.locks = [("a.hip", "Alice")]
     result = env.session.commit(["a.hip"], "Summary", push=False)
-    assert (result.committed, result.pushed, result.push_error) == (True, False, None)
+    assert (result.pushed, result.push_error) == (False, None)
     assert (result.revision, result.pushed_revision, result.branch) == (4, None, None)
     assert result.server_revision == 3
     assert "push" not in env.runner.verbs()
@@ -573,7 +571,7 @@ def test_commit_push_diverged_then_retry(env: Env) -> None:
     env.runner.locks = [("a.hip", "Alice")]
     env.runner.fail["push"] = (255, "[Error] Branch has diverged, sync to merge remote changes\n")
     result = env.session.commit(["a.hip"], "Summary")
-    assert (result.committed, result.pushed, result.diverged) == (True, False, True)
+    assert (result.pushed, result.diverged) == (False, True)
     assert result.push_error is not None
     assert "Branch has diverged" in result.push_error
     assert "Commit succeeded" in result.output
@@ -584,9 +582,7 @@ def test_commit_push_diverged_then_retry(env: Env) -> None:
 
     del env.runner.fail["push"]
     retry = env.session.retry_push()
-    assert (retry.committed, retry.pushed, retry.diverged, retry.push_error) == (
-        True, True, False, None,
-    )  # fmt: skip
+    assert (retry.pushed, retry.diverged, retry.push_error) == (True, False, None)
     assert (retry.revision, retry.pushed_revision, retry.branch) == (None, 4, "main")
     assert env.runner.calls("lock release") == [["a.hip"]]
     assert not writable(path)
@@ -647,7 +643,7 @@ def test_commit_push_other_failure_is_not_diverged(env: Env) -> None:
     env.runner.info = {"a.txt": "-"}
     env.runner.fail["push"] = (6, "[Error] Disconnected from server\n")
     result = env.session.commit(["a.txt"], "Summary")
-    assert (result.committed, result.pushed, result.diverged) == (True, False, False)
+    assert (result.pushed, result.diverged) == (False, False)
     assert result.push_error == "[Error] Disconnected from server"
 
 

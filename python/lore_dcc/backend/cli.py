@@ -85,9 +85,9 @@ class LoreCli:
             logger.warning("Lore %s is newer than the tested %s.", _dotted(version), _dotted(TESTED_VERSION))
         return version
 
-    def status(self, paths: Sequence[Path] = ()) -> parsers.Status:
-        """Return `lore status` for the working copy or the given paths."""
-        return self._status(["status"], paths)
+    def status(self) -> parsers.Status:
+        """Return `lore status` for the whole working copy."""
+        return self._status(["status"], ())
 
     def revision_status(self) -> parsers.Status:
         """Return `lore status --revision-only`: local and remote revision, no diffs."""
@@ -113,9 +113,9 @@ class LoreCli:
         """Commit everything staged. Returns Lore's output for display."""
         return self._run_once(["commit", message])
 
-    def push(self, branch: str | None = None) -> str:
+    def push(self) -> str:
         """Push local commits. Returns Lore's output for display."""
-        return self._run_once(["push", *([branch] if branch else [])])
+        return self._run_once(["push"])
 
     def lock_acquire(self, paths: Sequence[Path]) -> None:
         """Acquire locks on files, new or tracked.

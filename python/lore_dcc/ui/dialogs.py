@@ -14,7 +14,7 @@ from lore_dcc.backend.parsers import Status
 from lore_dcc.commit_model import CommitRow
 from lore_dcc.errors import LoreCommandError, LoreError
 from lore_dcc.session import CommitResult, Session
-from lore_dcc.ui import parent_window, prefs_folder
+from lore_dcc.ui import parent_window
 from lore_dcc.ui.messages import show_error, show_message
 from lore_dcc.ui.tasks import run_blocking
 
@@ -40,11 +40,7 @@ class _InfoData:
 def _load_info(session: Session) -> _InfoData:
     status = session.status()
     try:
-        identity = session.identity()
-        try:
-            identity_text = session.lore.auth_info().name
-        except LoreCommandError:
-            identity_text = ", ".join(sorted(identity.names))
+        identity_text = session.lore.auth_info().name
     except LoreCommandError:
         hint = "lore login"
         if session.workspace.remote_url:
@@ -100,11 +96,6 @@ def show_info(session: Session) -> None:
         show_error(exc, "Could not read Lore info")
         return
     _InfoDialog(session, data, parent_window()).exec()
-
-
-def _load_prefs() -> prefs.Prefs:
-    folder = prefs_folder()
-    return prefs.load_prefs(folder) if folder else prefs.Prefs()
 
 
 class _CommitDialog(QtWidgets.QDialog):
@@ -320,9 +311,6 @@ class _CommitDialog(QtWidgets.QDialog):
             self._apply_result(result)
 
     def _apply_result(self, result: CommitResult) -> None:
-        if not result.committed:
-            show_message("Lore - Commit", result.output or "Nothing was committed.")
-            return
         self.outcome = result
         push_failed = not result.pushed and (self._push_requested or result.push_error is not None)
         if push_failed:
@@ -350,8 +338,10 @@ class _CommitDialog(QtWidgets.QDialog):
         self.cancel_button.setText("Close")
 
 
-def show_commit(session: Session) -> CommitResult | None:
+def show_commit(session: Session, user_prefs: prefs.Prefs | None = None) -> CommitResult | None:
     """Show the modal Commit dialog. Returns the result, or None if cancelled.
+
+    `user_prefs` sets the dialog's option defaults; None uses `Prefs()` defaults.
 
     Groups: This session (session.touched), Outputs (session.outputs), Other
     changes, Cannot commit (FileState.blocked, disabled with the reason).
@@ -371,6 +361,6 @@ def show_commit(session: Session) -> CommitResult | None:
     if not rows:
         show_message("Lore - Commit", "There are no changes to commit.")
         return None
-    dialog = _CommitDialog(session, status, rows, _load_prefs(), parent_window())
+    dialog = _CommitDialog(session, status, rows, user_prefs or prefs.Prefs(), parent_window())
     dialog.exec()
     return dialog.outcome

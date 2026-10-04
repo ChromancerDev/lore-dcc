@@ -9,7 +9,7 @@ import hou
 import pytest
 from lore_dcc.errors import SettingsError
 from lore_dcc.houdini import outputs
-from lore_dcc.houdini.outputs import OutputSpec, OutputTable
+from lore_dcc.houdini.outputs import OutputSpec, find_spec
 
 
 def test_table_keys_strip_the_version_and_try_the_category_first() -> None:
@@ -34,16 +34,15 @@ def test_default_table_is_category_qualified_and_nonempty() -> None:
 
 
 def test_find_matches_versioned_types_and_keeps_categories_apart() -> None:
-    table = OutputTable()
-    assert table.find("Sop/filecache::2.0").parms == ("sopoutput",)
-    assert table.find("Lop/filecache").parms == ("lopoutput",)
-    assert table.find("Driver/gltf::2.0").parms == ("outputfile",)
-    assert table.find("Cop/file") is None
-    assert table.find("Sop/gltf::2.0") is None
+    assert find_spec({}, "Sop/filecache::2.0").parms == ("sopoutput",)
+    assert find_spec({}, "Lop/filecache").parms == ("lopoutput",)
+    assert find_spec({}, "Driver/gltf::2.0").parms == ("outputfile",)
+    assert find_spec({}, "Cop/file") is None
+    assert find_spec({}, "Sop/gltf::2.0") is None
 
 
 def test_file_sop_only_counts_in_write_mode() -> None:
-    spec = OutputTable().find("Sop/file")
+    spec = find_spec({}, "Sop/file")
     assert spec.parms == ("file",)
     assert spec.when == (("filemode", "write"),)
 
@@ -55,11 +54,10 @@ def test_overrides_win_over_defaults_and_replace_the_whole_entry() -> None:
             "Sop/mylib::exporter": {"parms": ["out"]},
         }
     )
-    table = OutputTable(overrides)
-    assert table.find("Sop/filecache::2.0") == OutputSpec(("file",), (("filemethod", 1),))
-    assert table.find("Lop/filecache").parms == ("file",)
-    assert table.find("Sop/mylib::exporter::1.0").parms == ("out",)
-    assert table.find("Sop/rop_geometry").parms == ("sopoutput",)
+    assert find_spec(overrides, "Sop/filecache::2.0") == OutputSpec(("file",), (("filemethod", 1),))
+    assert find_spec(overrides, "Lop/filecache").parms == ("file",)
+    assert find_spec(overrides, "Sop/mylib::exporter::1.0").parms == ("out",)
+    assert find_spec(overrides, "Sop/rop_geometry").parms == ("sopoutput",)
 
 
 @pytest.mark.parametrize(
@@ -102,12 +100,15 @@ def test_parse_overrides_accepts_none_and_empty() -> None:
         ((0, 0.3, 0.1), [0, 0.1, 0.2, 0.3]),
     ],
 )
-def test_frame_list(args: tuple[float, float, float], expected: list[float]) -> None:
-    assert outputs.frame_list(*args) == pytest.approx(expected)
+def test_frame_range_frames(args: tuple[float, float, float], expected: list[float]) -> None:
+    frames, total = outputs.frame_range(*args)
+    assert frames == pytest.approx(expected)
+    assert total == len(expected)
 
 
-def test_frame_list_is_capped() -> None:
-    assert len(outputs.frame_list(1, 10**9, 1)) == 100_000
+def test_frame_range_is_capped_but_counts_every_frame() -> None:
+    frames, total = outputs.frame_range(1, 10**9, 1)
+    assert (len(frames), total) == (100_000, 10**9)
 
 
 def test_when_matches_compares_ints_to_values_and_strings_to_tokens() -> None:
@@ -248,14 +249,6 @@ def test_is_output_node_uses_defaults_and_remembered_overrides() -> None:
     outputs.remember_overrides({"outputs": 5})
     assert not outputs.is_output_node(node)
     outputs.remember_overrides(None)
-
-
-def test_frame_count_is_uncapped_and_matches_frame_list_below_the_cap() -> None:
-    assert outputs.frame_count(1, 10**9, 1) == 10**9
-    assert outputs.frame_count(5, 9, 2) == 3
-    assert outputs.frame_count(9, 5, 1) == 0
-    assert outputs.frame_count(1, 3, 0) == 3
-    assert outputs.frame_count(1, 50, 7) == len(outputs.frame_list(1, 50, 7))
 
 
 def capped_node(tmp_path: Path, last: float) -> FakeNode:

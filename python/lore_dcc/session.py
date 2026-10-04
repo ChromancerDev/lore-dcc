@@ -80,7 +80,6 @@ class CommitResult:
     """Outcome of commit or retry_push.
 
     Attributes:
-        committed: True when a local revision was made.
         pushed: True when the revision reached the server.
         diverged: True when push failed because the branch is behind remote.
         push_error: Lore's push output when push failed, else None.
@@ -91,7 +90,6 @@ class CommitResult:
         server_revision: The remote revision after the call, when it could be read.
     """
 
-    committed: bool
     pushed: bool
     diverged: bool
     push_error: str | None
@@ -433,11 +431,10 @@ class Session:
         revision = parsers.committed_revision(output)
         if not push:
             return CommitResult(
-                True,
-                False,
-                False,
-                None,
-                output,
+                pushed=False,
+                diverged=False,
+                push_error=None,
+                output=output,
                 revision=revision,
                 server_revision=self._server_revision(),
             )
@@ -447,8 +444,7 @@ class Session:
         """Push existing local commits again after a failed push.
 
         Each earlier commit keeps its own `keep_locked` choice. With no commit
-        remembered in this session it only pushes. `committed` is True because
-        the local commits already exist.
+        remembered in this session it only pushes.
         """
         return self._push("", None)
 
@@ -468,11 +464,10 @@ class Session:
             error = exc.output.strip() or str(exc)
             logger.warning("Push failed: %s", error)
             return CommitResult(
-                True,
-                False,
-                "Branch has diverged" in exc.output,
-                error,
-                _join(output, error),
+                pushed=False,
+                diverged="Branch has diverged" in exc.output,
+                push_error=error,
+                output=_join(output, error),
                 revision=revision,
             )
         with self._lock:
@@ -485,11 +480,10 @@ class Session:
             output = _join(output, f"Pushed, but lock cleanup failed: {exc}")
         pushed = parsers.pushed_revision(pushed_output)
         return CommitResult(
-            True,
-            True,
-            False,
-            None,
-            output,
+            pushed=True,
+            diverged=False,
+            push_error=None,
+            output=output,
             revision=revision,
             pushed_revision=pushed.revision if pushed else None,
             branch=pushed.branch if pushed else None,

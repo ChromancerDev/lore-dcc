@@ -97,7 +97,7 @@ def test_status_merges_batches(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) 
 def test_nonzero_exit_raises_with_output(tmp_path: Path) -> None:
     runner = FakeRunner((6, "[Error] Disconnected from server\n"))
     with pytest.raises(LoreCommandError) as info:
-        make(tmp_path, runner).push("main")
+        make(tmp_path, runner).push()
     assert info.value.returncode == 6
     assert "Disconnected" in info.value.output
 

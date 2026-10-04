@@ -234,12 +234,8 @@ def test_file_info_blocks_keyed_by_path() -> None:
     infos = parsers.parse_file_info(FILE_INFO)
     assert list(infos) == ["source/test/cube/Cube.hiplc", "README.md", "source"]
     new = infos["source/test/cube/Cube.hiplc"]
-    assert (new.status, new.tracked, new.size, new.type) == ("Added", False, 0, "file")
-    assert new.hash == "0" * 64
-    readme = infos["README.md"]
-    assert (readme.status, readme.tracked, readme.size) == ("-", True, 1080)
-    assert readme.context == "01a01c8a97967810943481d293b74f25"
-    assert infos["source"].type == "dir"
+    assert (new.status, new.tracked) == ("Added", False)
+    assert (infos["README.md"].status, infos["README.md"].tracked) == ("-", True)
     assert infos["source"].tracked
 
 
@@ -286,13 +282,11 @@ Branch main
 def test_branch_info() -> None:
     info = parsers.parse_branch_info(BRANCH_INFO)
     assert (info.name, info.id) == ("main", "e726318bbc3fd75ac8733a7e030cc35b")
-    assert info.latest == info.remote_latest == "af62673685f70eb75c7018884116c9c7efa09cf395d929864698b77f27ee2843"
-    assert (info.creator, info.created) == ("artist@example.com", "Thu, 20 Aug 2026 00:18:59 +0000")
 
 
 def test_branch_info_optional_keys_may_be_absent() -> None:
     info = parsers.parse_branch_info("Branch feature one\n  ID: ab12\n")
-    assert (info.name, info.id, info.latest, info.remote_latest) == ("feature one", "ab12", None, None)
+    assert (info.name, info.id) == ("feature one", "ab12")
 
 
 @pytest.mark.parametrize(
@@ -342,12 +336,12 @@ def test_committed_revision_is_none_when_the_line_is_missing_or_odd(text: str) -
 
 
 def test_pushed_revision_reads_revision_and_branch() -> None:
-    assert parsers.pushed_revision(PUSH_OUT) == parsers.PushedRevision(3, SIG, "main")
+    assert parsers.pushed_revision(PUSH_OUT) == parsers.PushedRevision(3, "main")
 
 
 def test_pushed_revision_takes_the_last_of_several() -> None:
     text = f"Pushed revision 3 -> {SIG} to branch dev\nPushed revision 4 -> {SIG} to branch dev\n"
-    assert parsers.pushed_revision(text) == parsers.PushedRevision(4, SIG, "dev")
+    assert parsers.pushed_revision(text) == parsers.PushedRevision(4, "dev")
 
 
 @pytest.mark.parametrize("text", ["", "Pushed 1 fragment(s)\n", "Pushed revision 3 to branch main\n"])

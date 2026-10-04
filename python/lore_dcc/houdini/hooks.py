@@ -45,7 +45,7 @@ def install() -> None:
     try:
         host.setup()
     except Exception:
-        logger.exception("Lore could not set up its dialogs and prefs folder")
+        logger.exception("Lore could not set up its dialogs")
 
 
 def _on_hip_event(event_type: Any) -> None:
@@ -127,7 +127,7 @@ def after_save(file: str) -> None:
         default="Stage",
     )
     if choice == "Stage":
-        _guarded(host.run, session.stage, [file], context=f"Staging {Path(file).name}")
+        _guarded(session.stage, [file], context=f"Staging {Path(file).name}")
 
 
 def after_load(file: str) -> None:
@@ -172,7 +172,7 @@ def _file_key(file: str) -> str:
 
 def _guarded(call: Any, *args: Any, context: str) -> None:
     try:
-        call(*args)
+        host.run(call, *args)
     except LoreError as exc:
         host.error(exc, context)
 
@@ -203,7 +203,7 @@ def _offer_writable(session: Session, state: FileState, file: str) -> None:
         default="Leave read-only",
     )
     if choice == "Make writable":
-        _guarded(host.run, session.make_writable, [file], context=f"Making {name} writable")
+        _guarded(session.make_writable, [file], context=f"Making {name} writable")
 
 
 def _handle_unlocked(session: Session, state: FileState, file: str, prompt: bool) -> None:
@@ -211,7 +211,7 @@ def _handle_unlocked(session: Session, state: FileState, file: str, prompt: bool
     read_only = state.exists and not os.access(file, os.W_OK)
     if key in _save_unlocked:
         if read_only:
-            _guarded(host.run, session.make_writable, [file], context="Making the file writable")
+            _guarded(session.make_writable, [file], context="Making the file writable")
     elif prompt:
         _offer_lock(session, file)
     elif read_only:
@@ -241,7 +241,7 @@ def _offer_lock(session: Session, file: str) -> None:
         default="Lock and save",
     )
     if choice == "Lock and save":
-        _guarded(host.run, session.lock, [file], context=f"Locking {name}")
+        _guarded(session.lock, [file], context=f"Locking {name}")
     elif choice == "Save without lock":
         _save_unlocked.add(_file_key(file))
-        _guarded(host.run, session.make_writable, [file], context=f"Making {name} writable")
+        _guarded(session.make_writable, [file], context=f"Making {name} writable")

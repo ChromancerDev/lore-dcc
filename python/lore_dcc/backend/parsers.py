@@ -116,20 +116,10 @@ class FileInfo:
 
     Attributes:
         path: Repo-relative path as Lore printed it.
-        type: `file` or `dir`, as printed.
-        size: Size in bytes.
-        mode: The `Mode` value, as printed.
-        context: The `Context` value, as printed.
-        hash: The `Hash` value; all zeros for a file Lore does not track.
         status: `-` (tracked, clean), `Modified`, `Deleted` or `Added` (not tracked).
     """
 
     path: str
-    type: str
-    size: int
-    mode: str
-    context: str
-    hash: str
     status: str
 
     @property
@@ -145,18 +135,10 @@ class BranchInfo:
     Attributes:
         name: The branch name.
         id: The branch ID, as lock records print it.
-        latest: The latest local revision signature, if printed.
-        remote_latest: The latest remote revision signature, if printed.
-        creator: Who created the branch, if printed.
-        created: When the branch was created, as printed.
     """
 
     name: str
     id: str
-    latest: str | None
-    remote_latest: str | None
-    creator: str | None
-    created: str | None
 
 
 @dataclass(frozen=True)
@@ -165,12 +147,10 @@ class PushedRevision:
 
     Attributes:
         revision: The pushed revision number.
-        signature: The revision signature as printed.
         branch: The branch name the revision went to.
     """
 
     revision: int
-    signature: str
     branch: str
 
 
@@ -193,7 +173,7 @@ def pushed_revision(text: str) -> PushedRevision | None:
     found: PushedRevision | None = None
     for line in text.splitlines():
         if match := _PUSHED_REVISION.match(line.strip()):
-            found = PushedRevision(int(match["rev"]), match["sig"], match["branch"])
+            found = PushedRevision(int(match["rev"]), match["branch"])
     return found
 
 
@@ -288,14 +268,7 @@ def parse_branch_info(text: str) -> BranchInfo:
         fields[key] = value.strip()
     if not fields.get("ID"):
         raise LoreOutputError("lore branch info is missing ID", text)
-    return BranchInfo(
-        name=match["name"].strip(),
-        id=fields["ID"],
-        latest=fields.get("Latest"),
-        remote_latest=fields.get("Remote Latest"),
-        creator=fields.get("Creator"),
-        created=fields.get("Created"),
-    )
+    return BranchInfo(name=match["name"].strip(), id=fields["ID"])
 
 
 def parse_lock_query(text: str) -> tuple[LockRecord, ...]:
@@ -356,15 +329,7 @@ def parse_file_info(text: str) -> dict[str, FileInfo]:
             raise LoreOutputError(f"Unknown lore file info Status: {block['Status']!r}", text)
         if not block["Size"].isdigit():
             raise LoreOutputError(f"Unrecognised lore file info Size: {block['Size']!r}", text)
-        infos[block["Path"]] = FileInfo(
-            path=block["Path"],
-            type=block["Type"],
-            size=int(block["Size"]),
-            mode=block["Mode"],
-            context=block["Context"],
-            hash=block["Hash"],
-            status=block["Status"],
-        )
+        infos[block["Path"]] = FileInfo(path=block["Path"], status=block["Status"])
         block.clear()
 
     for line in text.splitlines():

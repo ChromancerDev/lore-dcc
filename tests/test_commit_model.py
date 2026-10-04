@@ -204,7 +204,7 @@ def test_files_label_and_hints() -> None:
 
 
 def result(**kw) -> CommitResult:
-    base = {"committed": True, "pushed": False, "diverged": False, "push_error": None, "output": ""}
+    base = {"pushed": False, "diverged": False, "push_error": None, "output": ""}
     return CommitResult(**{**base, **kw})
 
 

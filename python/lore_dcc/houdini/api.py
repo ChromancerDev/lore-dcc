@@ -32,7 +32,7 @@ def pre_render(node: Any = None) -> tuple[str, ...]:
     Returns:
         The repo-relative paths this call locked.
     """
-    return _guarded(node, (), _prepare) or ()
+    return _guarded(node, (), lambda s, p: s.prepare_write(p), "Locking outputs") or ()
 
 
 def post_render(node: Any = None) -> WriteResult | None:
@@ -41,25 +41,19 @@ def post_render(node: Any = None) -> WriteResult | None:
     Args:
         node: The ROP or File Cache. Defaults to `hou.pwd()`.
     """
-    return _guarded(node, None, _finish)
+    return _guarded(node, None, lambda s, p: s.finish_write(p), "Collecting outputs")
 
 
-def _prepare(session: Session, paths: list[Path]) -> tuple[str, ...]:
-    return host.run(session.prepare_write, paths, title="Locking outputs")
-
-
-def _finish(session: Session, paths: list[Path]) -> WriteResult:
-    return host.run(session.finish_write, paths, title="Collecting outputs")
-
-
-def _guarded[T](node: Any, empty: T, step: Callable[[Session, list[Path]], T]) -> T:
+def _guarded[T](
+    node: Any, empty: T, step: Callable[[Session, list[Path]], T], title: str
+) -> T:
     node = node if node is not None else hou.pwd()
     try:
         if not host.load_prefs().enabled:
             return empty
         session = host.session_for(hou.hipFile.path())
         paths = outputs.outputs_for_node(node, session)
-        return step(session, paths) if paths else empty
+        return host.run(step, session, paths, title=title) if paths else empty
     except NotAWorkingCopy:
         return empty
     except Exception as exc:
