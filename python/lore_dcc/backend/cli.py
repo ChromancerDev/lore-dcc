@@ -89,6 +89,10 @@ class LoreCli:
         """Return `lore status` for the working copy or the given paths."""
         return self._status(["status"], paths)
 
+    def revision_status(self) -> parsers.Status:
+        """Return `lore status --revision-only`: local and remote revision, no diffs."""
+        return self._status(["status", "--revision-only"], ())
+
     def check_dirty(self, paths: Sequence[Path]) -> parsers.Status:
         """Re-verify dirty files against disk; unchanged ones drop out."""
         return self._status(["status", "--check-dirty"], paths)

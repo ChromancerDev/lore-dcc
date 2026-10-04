@@ -194,3 +194,14 @@ def test_lock_acquire_held_check_is_exact_elsewhere(
     runner = FakeRunner((0, "Lock acquired on files:\nscenes/A.HIP\n"))
     with pytest.raises(LockNotAcquired):
         make(tmp_path, runner).lock_acquire([Path("scenes/a.hip")])
+
+
+def test_revision_status_asks_for_revision_only_and_parses_the_remote(tmp_path: Path) -> None:
+    out = (
+        f"Repository 0123\nOn branch main revision 3 -> {SIG}\n"
+        f"Remote revision 5 -> {SIG}\nLocal branch is behind remote\n"
+    )
+    runner = FakeRunner((0, out))
+    status = make(tmp_path, runner).revision_status()
+    assert runner.calls == [["lore", "-P", "--non-interactive", "status", "--revision-only"]]
+    assert (status.revision, status.remote_revision) == (3, 5)

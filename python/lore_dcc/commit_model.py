@@ -196,6 +196,29 @@ def first_error_line(text: str | None) -> str:
     return "unknown error"
 
 
+def commit_complete_text(result: CommitResult) -> str:
+    """Return the Commit Complete message for a commit that landed, pushed or not.
+
+    A revision, branch or server revision Lore did not report is left out of
+    the text rather than guessed.
+    """
+    number = result.revision if result.revision is not None else result.pushed_revision
+    revision = f"revision {number}" if number is not None else "your changes"
+    if result.pushed:
+        target = f" to {result.branch}" if result.branch else ""
+        lines = [f"Committed {revision} and pushed it{target}."]
+    else:
+        lines = [
+            (
+                f"Committed {revision} locally. "
+                "It has not been pushed, so nothing has reached the server yet."
+            )
+        ]
+    if result.server_revision is not None:
+        lines.append(f"The server is at revision {result.server_revision}.")
+    return "\n".join(lines)
+
+
 def push_failure_text(result: CommitResult) -> str:
     """Return the message for a commit that landed locally but was not pushed."""
     if result.diverged:

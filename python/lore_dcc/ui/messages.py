@@ -14,9 +14,9 @@ from lore_dcc.errors import (
     NotAWorkingCopy,
 )
 from lore_dcc.session import CommitBlocked
-from lore_dcc.ui import parent_window
+from lore_dcc.ui import parent_window, window_title
 
-_TITLE = "Lore"
+_ERROR_TITLE = "Lore - Error"
 
 
 def _box(
@@ -24,7 +24,7 @@ def _box(
 ) -> QtWidgets.QMessageBox:
     box = QtWidgets.QMessageBox(parent_window())
     box.setIcon(icon)
-    box.setWindowTitle(title)
+    box.setWindowTitle(window_title(title))
     box.setText(text)
     if details:
         box.setDetailedText(details)
@@ -75,7 +75,7 @@ def _error_box(error: BaseException, context: str) -> QtWidgets.QMessageBox:
     else:
         message = str(error) or type(error).__name__
     text = f"{context}\n\n{message}" if context else message
-    return _box(QtWidgets.QMessageBox.Icon.Critical, _TITLE, text, details)
+    return _box(QtWidgets.QMessageBox.Icon.Critical, _ERROR_TITLE, text, details)
 
 
 def show_error(error: BaseException, context: str = "") -> None:

@@ -31,10 +31,12 @@ The package only enables itself in Houdini 22 or newer. The plugin needs no othe
 
 | Where | Actions |
 |---|---|
+| `Lore` menu in the main menu bar | Info, Lock, Discard changes, Collect Outputs, Commit, Enable/Disable |
 | `Lore` shelf | Info, Enable/Disable, Lock, Discard changes, Collect Outputs, Commit |
 | Node right-click, `Lore` | Lock and Discard changes on an asset's library file. Lock Outputs and Collect Outputs on ROPs and File Caches. |
 | Parameter right-click, `Lore` | Lock and Discard changes on the file a string parameter names |
-| Saving | Before saving an unlocked tracked file: "Lock and save?". After saving a new file: "Stage it?". Turn the prompts off in `lore_dcc_prefs.json` in your Houdini user folder. |
+| Saving | Before saving an unlocked tracked file: "Lore - Lock File?". After saving a new file: "Lore - Stage New File?". Saving over a file someone else locked: "Lore - File Locked by Another User". Turn the prompts off in `lore_dcc_prefs.json` in your Houdini user folder. |
+| After Commit | `Lore - Commit Complete` names the committed revision, the branch it was pushed to and the revision the server is at. |
 
 Tracked hip, HDA and cache files are read-only on disk unless you hold their lock. To make a ROP lock its own outputs, set its Pre-Render Script and Post-Render Script to Python:
 

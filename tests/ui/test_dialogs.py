@@ -22,6 +22,14 @@ UNCHECKED = QtCore.Qt.CheckState.Unchecked
 PARTIAL = QtCore.Qt.CheckState.PartiallyChecked
 
 
+@pytest.fixture(autouse=True)
+def shown(monkeypatch) -> list[tuple[str, str]]:
+    """Capture show_message calls so no test blocks on a modal box."""
+    calls: list[tuple[str, str]] = []
+    monkeypatch.setattr(dialogs, "show_message", lambda title, text: calls.append((title, text)))
+    return calls
+
+
 def make_status(note: str | None = "Local branch in sync with remote", **kw) -> Status:
     return Status(
         branch="main",
@@ -39,7 +47,17 @@ def state(path, lock=LockState.NOT_LOCKED, owner=None) -> FileState:
 
 
 def outcome(**kw) -> CommitResult:
-    base = {"committed": True, "pushed": True, "diverged": False, "push_error": None, "output": ""}
+    base = {
+        "committed": True,
+        "pushed": True,
+        "diverged": False,
+        "push_error": None,
+        "output": "",
+        "revision": 4,
+        "pushed_revision": 4,
+        "branch": "main",
+        "server_revision": 4,
+    }
     return CommitResult(**{**base, **kw})
 
 
@@ -339,12 +357,10 @@ def test_show_commit_cancel_returns_none(qapp, monkeypatch) -> None:
     assert dialogs.show_commit(FakeSession()) is None
 
 
-def test_show_commit_with_no_changes_says_so(qapp, monkeypatch) -> None:
-    messages = []
-    monkeypatch.setattr(dialogs, "show_message", lambda title, text: messages.append(text))
+def test_show_commit_with_no_changes_says_so(qapp, monkeypatch, shown) -> None:
     session = FakeSession(status=make_status())
     assert dialogs.show_commit(session) is None
-    assert messages == ["There are no changes to commit."]
+    assert shown == [("Lore - Commit", "There are no changes to commit.")]
 
 
 def test_show_commit_reports_read_errors(qapp, monkeypatch) -> None:
@@ -430,3 +446,57 @@ def test_show_info_reports_status_failure(qapp, monkeypatch) -> None:
     )
     dialogs.show_info(session)
     assert shown == ["Could not read Lore info"]
+
+
+def test_dialog_window_titles_start_with_lore(qapp) -> None:
+    dlg = build()
+    assert dlg.windowTitle() == "Lore - Commit"
+    info = dialogs._InfoDialog(FakeSession(), dialogs._load_info(FakeSession()), None)
+    assert info.windowTitle() == "Lore - Info"
+
+
+def test_commit_and_push_shows_the_pushed_message(qapp, shown) -> None:
+    dlg = build(FakeSession(commit_result=outcome(revision=3, pushed_revision=3, server_revision=3)))
+    dlg.summary_edit.setText("x")
+    dlg.commit_button.click()
+    assert shown == [
+        (
+            "Lore - Commit Complete",
+            "Committed revision 3 and pushed it to main.\nThe server is at revision 3.",
+        )
+    ]
+    assert dlg.result() == QtWidgets.QDialog.DialogCode.Accepted
+
+
+def test_commit_without_push_shows_the_local_message(qapp, shown) -> None:
+    result = outcome(pushed=False, pushed_revision=None, branch=None, revision=5, server_revision=4)
+    dlg = build(FakeSession(commit_result=result))
+    dlg.push_box.setChecked(False)
+    dlg.summary_edit.setText("x")
+    dlg.commit_button.click()
+    assert shown == [
+        (
+            "Lore - Commit Complete",
+            (
+                "Committed revision 5 locally. It has not been pushed, so nothing has reached "
+                "the server yet.\nThe server is at revision 4."
+            ),
+        )
+    ]
+    assert dlg.result() == QtWidgets.QDialog.DialogCode.Accepted
+
+
+def test_failed_push_shows_no_complete_message_until_the_retry_succeeds(qapp, shown) -> None:
+    session = FakeSession(commit_result=outcome(pushed=False, push_error="nope", revision=6))
+    session.retry_results = [outcome(revision=None, pushed_revision=6, server_revision=6)]
+    dlg = build(session)
+    dlg.summary_edit.setText("x")
+    dlg.commit_button.click()
+    assert shown == []
+    dlg.retry_button.click()
+    assert shown == [
+        (
+            "Lore - Commit Complete",
+            "Committed revision 6 and pushed it to main.\nThe server is at revision 6.",
+        )
+    ]

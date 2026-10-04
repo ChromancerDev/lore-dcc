@@ -7,7 +7,7 @@ from collections.abc import Callable
 
 from PySide6 import QtCore, QtGui, QtWidgets
 
-from lore_dcc.ui import parent_window
+from lore_dcc.ui import parent_window, window_title
 
 _SHOW_AFTER_MS = 300
 
@@ -17,7 +17,7 @@ class _BusyDialog(QtWidgets.QProgressDialog):
 
     def __init__(self, title: str, parent: QtWidgets.QWidget | None) -> None:
         super().__init__(parent)
-        self.setWindowTitle(title)
+        self.setWindowTitle(window_title(title))
         self.setLabelText(f"{title}...")
         self.setRange(0, 0)
         self.setCancelButton(None)
@@ -40,7 +40,7 @@ class _Notifier(QtCore.QObject):
 
 
 def run_blocking[T](
-    fn: Callable[..., T], *args: object, title: str = "Lore", **kwargs: object
+    fn: Callable[..., T], *args: object, title: str = "Working", **kwargs: object
 ) -> T:
     """Run `fn(*args, **kwargs)` on a worker thread and return its result.
 

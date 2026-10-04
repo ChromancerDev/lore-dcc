@@ -10,7 +10,22 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
+TITLE_PREFIX = "Lore - "
+
 _parent_provider: Callable[[], Any] | None = None
+
+
+def window_title(title: str) -> str:
+    """Return `title` as a window title that starts with `Lore - `.
+
+    A blank title or a bare `Lore` becomes `Lore - Info`.
+    """
+    title = title.strip()
+    if title.startswith(TITLE_PREFIX):
+        return title
+    if title in ("", "Lore"):
+        return f"{TITLE_PREFIX}Info"
+    return f"{TITLE_PREFIX}{title}"
 
 
 def set_parent_provider(provider: Callable[[], Any]) -> None:

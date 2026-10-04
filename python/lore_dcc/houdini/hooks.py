@@ -121,8 +121,8 @@ def after_save(file: str) -> None:
     if _is_staged(session, file):
         return
     choice = host.ask(
-        "Stage it?",
-        f"{Path(file).name} is new. Stage it so it can be committed?",
+        "Lore - Stage New File?",
+        f"{Path(file).name} is not staged in Lore. Stage it now?",
         ["Stage", "Not now"],
         default="Stage",
     )
@@ -184,7 +184,7 @@ def _warn_unknown(file: str) -> None:
         return
     _unknown_warned = True
     host.message(
-        "Lore",
+        "Lore - Lock State Unknown",
         "Lore could not tell who holds the lock on this file, so the plugin leaves it as it is "
         "and blocks committing it. Run `lore login` or check the connection.",
     )
@@ -196,10 +196,9 @@ def _offer_writable(session: Session, state: FileState, file: str) -> None:
         logger.info("%s is locked by %s and already writable", name, state.owner)
         return
     choice = host.ask(
-        "Locked by someone else",
-        f"{name} is locked by {state.owner}.\n\n"
-        "Make writable lets you save anyway. The file then shows under Cannot commit "
-        "until their lock is released. If you leave it read-only, the save fails.",
+        "Lore - File Locked by Another User",
+        f"{name} is locked in Lore by {state.owner}. "
+        "Saving here makes a local copy you cannot commit until they release the lock.",
         ["Make writable", "Leave read-only"],
         default="Leave read-only",
     )
@@ -227,7 +226,7 @@ def _warn_read_only(file: str) -> None:
         return
     _read_only_warned.add(key)
     host.message(
-        "Lore",
+        "Lore - File Not Locked",
         f"{name} is tracked and not locked, so the save will fail. "
         "Use Lock on the Lore shelf, then save again.",
     )
@@ -236,10 +235,8 @@ def _warn_read_only(file: str) -> None:
 def _offer_lock(session: Session, file: str) -> None:
     name = Path(file).name
     choice = host.ask(
-        "Lock and save?",
-        f"{name} is tracked and not locked. Lock it so nobody else can change it while you work?"
-        "\n\nSave without lock makes the file writable without a lock, and Lore stops asking "
-        "about this file until Houdini restarts.",
+        "Lore - Lock File?",
+        f"{name} is not locked in Lore. Lock it before saving?",
         ["Lock and save", "Save without lock"],
         default="Lock and save",
     )

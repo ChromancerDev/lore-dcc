@@ -179,13 +179,13 @@ check(
     "save of a new file: state, mark_saved, state, staged check",
 )
 check(fake.paths("mark_saved") == [norm(hip)], "mark_saved got the saved file")
-check(capture.saw("Stage it?"), "untracked file: stage prompt logged, not shown")
+check(capture.saw("Lore - Stage New File?"), "untracked file: stage prompt logged, not shown")
 check("stage" not in fake.names(), "no stage without a UI")
 
 fake.forget()
 fake.state = {"exists": True, "tracked": True, "lock": LockState.NOT_LOCKED, "owner": None}
 hou.hipFile.save()
-check(capture.saw("Lock and save?"), "tracked unlocked file: lock prompt logged")
+check(capture.saw("Lore - Lock File?"), "tracked unlocked file: lock prompt logged")
 check("lock" not in fake.names() and "make_writable" not in fake.names(), "prompts change nothing without a UI")
 check("mark_saved" in fake.names(), "mark_saved runs on every save")
 

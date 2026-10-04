@@ -68,7 +68,7 @@ def test_slow_call_shows_modal_busy_dialog_without_cancel(qapp) -> None:
     QtCore.QTimer.singleShot(550, probe)
     tasks.run_blocking(time.sleep, 0.9, title="Working")
     assert seen["modal"] == QtCore.Qt.WindowModality.ApplicationModal
-    assert seen["title"] == "Working"
+    assert seen["title"] == "Lore - Working"
     assert seen["range"] == (0, 0)
     assert seen["cancel"] is None or not seen["cancel"].isVisible()
     assert not any(

@@ -264,3 +264,25 @@ def test_windows_matching_is_case_insensitive(monkeypatch: pytest.MonkeyPatch) -
         "Staged.TXT": (cm.GROUP_OTHER, True),
         "BLOCKED.hip": (cm.GROUP_BLOCKED, False),
     }
+
+
+def test_commit_complete_text_pushed() -> None:
+    text = cm.commit_complete_text(
+        result(pushed=True, revision=3, pushed_revision=3, branch="main", server_revision=3)
+    )
+    assert text == "Committed revision 3 and pushed it to main.\nThe server is at revision 3."
+
+
+def test_commit_complete_text_not_pushed() -> None:
+    text = cm.commit_complete_text(result(pushed=False, revision=3, server_revision=2))
+    assert text == (
+        "Committed revision 3 locally. It has not been pushed, so nothing has reached the "
+        "server yet.\nThe server is at revision 2."
+    )
+
+
+def test_commit_complete_text_leaves_out_what_lore_did_not_report() -> None:
+    assert cm.commit_complete_text(result(pushed=True)) == "Committed your changes and pushed it."
+    assert cm.commit_complete_text(result(pushed=False)).startswith("Committed your changes locally.")
+    retried = result(pushed=True, revision=None, pushed_revision=7, branch="main", server_revision=7)
+    assert cm.commit_complete_text(retried).startswith("Committed revision 7 and pushed it to main.")

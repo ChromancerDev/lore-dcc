@@ -12,6 +12,7 @@ from lore_dcc.houdini import actions, hooks, host
 from lore_dcc.locks import LockState
 from lore_dcc.prefs import Prefs
 from lore_dcc.session import FileState, WriteResult
+from lore_dcc.ui import TITLE_PREFIX
 
 
 class FakeSession:
@@ -44,10 +45,15 @@ def env(monkeypatch: pytest.MonkeyPatch):
     session = FakeSession()
     answers: list[str | None] = []
     asked: list[tuple[str, list[str]]] = []
-    state = SimpleNamespace(session=session, prefs=Prefs(), asked=asked, answers=answers, ui=True)
+    texts: list[str] = []
+    state = SimpleNamespace(
+        session=session, prefs=Prefs(), asked=asked, answers=answers, ui=True, texts=texts
+    )
 
     def ask(title, text, buttons, default=None):
+        assert title.startswith(TITLE_PREFIX), title
         asked.append((title, list(buttons)))
+        texts.append(text)
         return answers.pop(0) if answers else None
 
     monkeypatch.setattr(host, "load_prefs", lambda: state.prefs)
@@ -55,7 +61,12 @@ def env(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setattr(host, "run", lambda fn, *args, title="Lore": fn(*args))
     monkeypatch.setattr(host, "has_ui", lambda: state.ui)
     monkeypatch.setattr(host, "ask", ask)
-    monkeypatch.setattr(host, "message", lambda title, text: asked.append((title, [])))
+
+    def message(title, text):
+        assert title.startswith(TITLE_PREFIX), title
+        asked.append((title, []))
+
+    monkeypatch.setattr(host, "message", message)
     monkeypatch.setattr(host, "error", lambda exc, context="": asked.append(("error", [])))
     monkeypatch.setattr(hooks, "_unknown_warned", False)
     monkeypatch.setattr(hooks, "_save_unlocked", set())
@@ -66,7 +77,7 @@ def env(monkeypatch: pytest.MonkeyPatch):
 def test_lock_prompt_offers_two_choices_and_locks(env) -> None:
     env.answers.append("Lock and save")
     hooks.before_save("a.hip")
-    assert env.asked == [("Lock and save?", ["Lock and save", "Save without lock"])]
+    assert env.asked == [("Lore - Lock File?", ["Lock and save", "Save without lock"])]
     assert env.session.names() == ["file_states", "lock"]
 
 
@@ -85,7 +96,7 @@ def test_save_without_lock_makes_writable_and_is_remembered_per_file(env, tmp_pa
     assert env.session.names() == ["file_states"]
     env.answers.append("Lock and save")
     hooks.before_save(str(other))
-    assert [title for title, _ in env.asked] == ["Lock and save?"]
+    assert [title for title, _ in env.asked] == ["Lore - Lock File?"]
 
 
 def test_remembered_save_without_lock_rewrites_a_read_only_bit_silently(env, tmp_path: Path) -> None:
@@ -105,7 +116,7 @@ def test_remembered_save_without_lock_rewrites_a_read_only_bit_silently(env, tmp
 def test_closing_the_lock_prompt_changes_nothing_and_asks_again_next_time(env) -> None:
     hooks.before_save("a.hip")
     hooks.before_save("a.hip")
-    assert [title for title, _ in env.asked] == ["Lock and save?", "Lock and save?"]
+    assert [title for title, _ in env.asked] == ["Lore - Lock File?", "Lore - Lock File?"]
     assert env.session.names() == ["file_states", "file_states"]
 
 
@@ -121,9 +132,9 @@ def test_prompt_off_warns_once_per_file_when_read_only(env, tmp_path: Path, capl
         hooks.before_save(str(target))
         hooks.before_save(str(target))
     assert len([r for r in caplog.records if "will fail" in r.getMessage()]) == 2
-    assert env.asked == [("Lore", [])]
+    assert env.asked == [("Lore - File Not Locked", [])]
     hooks.before_save(str(other))
-    assert env.asked == [("Lore", []), ("Lore", [])]
+    assert env.asked == [("Lore - File Not Locked", []), ("Lore - File Not Locked", [])]
     assert env.session.names() == ["file_states"] * 3
     os.chmod(target, 0o666)
     os.chmod(other, 0o666)
@@ -160,7 +171,7 @@ def test_locked_by_other_names_the_owner_and_offers_writable(env, tmp_path: Path
     env.session.state.update(lock=LockState.LOCKED_BY_OTHER, owner="Ana")
     env.answers.append("Make writable")
     hooks.before_save(str(target))
-    assert env.asked == [("Locked by someone else", ["Make writable", "Leave read-only"])]
+    assert env.asked == [("Lore - File Locked by Another User", ["Make writable", "Leave read-only"])]
     assert env.session.names() == ["file_states", "make_writable"]
     os.chmod(target, 0o666)
 
@@ -177,7 +188,7 @@ def test_unknown_state_warns_once_and_changes_nothing(env) -> None:
     env.session.state.update(lock=LockState.UNKNOWN)
     hooks.before_save("a.hip")
     hooks.before_save("a.hip")
-    assert [title for title, _ in env.asked] == ["Lore"]
+    assert [title for title, _ in env.asked] == ["Lore - Lock State Unknown"]
     assert env.session.names() == ["file_states", "file_states"]
 
 
@@ -211,7 +222,7 @@ def test_after_save_marks_then_offers_to_stage_a_new_file(env) -> None:
     env.session.state.update(tracked=False)
     env.answers.append("Stage")
     hooks.after_save("a.hip")
-    assert env.asked == [("Stage it?", ["Stage", "Not now"])]
+    assert env.asked == [("Lore - Stage New File?", ["Stage", "Not now"])]
     assert env.session.names() == ["mark_saved", "file_states", "is_staged", "stage"]
 
 
@@ -287,21 +298,21 @@ def parms(monkeypatch: pytest.MonkeyPatch):
 def test_parm_actions_refuse_an_empty_value(env, parms, value: str) -> None:
     actions.lock_parm_file(FakeParm(value))
     actions.discard_parm_file(FakeParm(value))
-    assert [title for title, _ in env.asked] == ["Lore", "Lore"]
+    assert [title for title, _ in env.asked] == ["Lore - Parameter File", "Lore - Parameter File"]
     assert env.session.calls == []
 
 
 def test_parm_actions_refuse_a_folder(env, parms, tmp_path: Path) -> None:
     actions.lock_parm_file(FakeParm(str(tmp_path)))
     actions.discard_parm_file(FakeParm(str(tmp_path)))
-    assert [title for title, _ in env.asked] == ["Lore", "Lore"]
+    assert [title for title, _ in env.asked] == ["Lore - Parameter File", "Lore - Parameter File"]
     assert env.session.calls == []
 
 
 def test_discard_parm_requires_an_existing_file_but_lock_does_not(env, parms, tmp_path: Path) -> None:
     missing = str(tmp_path / "gone.bgeo")
     actions.discard_parm_file(FakeParm(missing))
-    assert env.asked == [("Lore", [])]
+    assert env.asked == [("Lore - Parameter File", [])]
     assert env.session.calls == []
     actions.lock_parm_file(FakeParm(missing))
     assert env.session.names() == ["lock"]
@@ -319,14 +330,14 @@ def test_parm_actions_expand_variables_and_run_on_a_file(env, monkeypatch, tmp_p
     env.answers.append("Discard changes")
     actions.discard_parm_file(FakeParm("$HIP/a.bgeo"))
     assert env.session.names() == ["file_states", "discard"]
-    assert [title for title, _ in env.asked] == ["Discard changes"]
+    assert [title for title, _ in env.asked] == ["Lore - Discard Changes?"]
 
 
 def test_discard_refuses_a_new_file_without_asking(env, tmp_path: Path) -> None:
     env.session.state.update(tracked=False)
     target = str(tmp_path / "new.hip")
     assert actions._discard_files(env.session, [target], "") is False
-    assert env.asked == [("Lore", [])]
+    assert env.asked == [("Lore - Discard Changes", [])]
     assert env.session.names() == ["file_states"]
 
 
@@ -344,7 +355,7 @@ def test_discard_hda_refuses_a_new_library_file(env, monkeypatch, tmp_path: Path
     monkeypatch.setattr(actions, "_library_file", lambda node: str(tmp_path / "lib.hda"))
     monkeypatch.setattr(actions.hou, "hda", SimpleNamespace(reloadFile=reloaded.append), raising=False)
     actions.discard_hda(object())
-    assert env.asked == [("Lore", [])]
+    assert env.asked == [("Lore - Discard Changes", [])]
     assert reloaded == []
     assert "discard" not in env.session.names()
 
@@ -364,7 +375,7 @@ def test_discard_hip_refuses_a_new_file_and_reloads_a_tracked_one(
     env.session.state.update(tracked=False)
     actions.discard()
     assert loaded == []
-    assert env.asked == [("Lore", [])]
+    assert env.asked == [("Lore - Discard Changes", [])]
     env.asked.clear()
     env.session.state.update(tracked=True)
     env.answers.append("Discard changes")
@@ -417,3 +428,34 @@ def test_collect_node_outputs_summary_carries_frame_cap_warnings(env, monkeypatc
     monkeypatch.setattr(host, "message", lambda title, text: messages.append(text))
     actions.collect_node_outputs(object())
     assert messages == ["This scene writes no files inside the working copy.\nWarning: capped"]
+
+
+def test_stage_prompt_wording(env) -> None:
+    env.session.state.update(tracked=False)
+    hooks.after_save("D:/work/scene.hip")
+    assert env.asked == [("Lore - Stage New File?", ["Stage", "Not now"])]
+    assert env.texts == ["scene.hip is not staged in Lore. Stage it now?"]
+
+
+def test_lock_prompt_wording(env) -> None:
+    hooks.before_save("D:/work/scene.hip")
+    assert env.asked == [("Lore - Lock File?", ["Lock and save", "Save without lock"])]
+    assert env.texts == ["scene.hip is not locked in Lore. Lock it before saving?"]
+
+
+def test_locked_by_another_user_wording(env, tmp_path: Path) -> None:
+    target = tmp_path / "scene.hip"
+    target.write_text("x")
+    os.chmod(target, 0o444)
+    env.session.state.update(lock=LockState.LOCKED_BY_OTHER, owner="Ana")
+    hooks.before_save(str(target))
+    assert env.asked == [
+        ("Lore - File Locked by Another User", ["Make writable", "Leave read-only"])
+    ]
+    assert env.texts == [
+        (
+            "scene.hip is locked in Lore by Ana. Saving here makes a local copy you cannot "
+            "commit until they release the lock."
+        )
+    ]
+    os.chmod(target, 0o666)

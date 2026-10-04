@@ -14,6 +14,7 @@ from dataclasses import dataclass
 from itertools import chain
 from pathlib import Path
 
+from lore_dcc.backend import parsers
 from lore_dcc.backend.cli import LoreCli
 from lore_dcc.backend.parsers import FileInfo, Status
 from lore_dcc.errors import LockNotAcquired, LoreCommandError, LoreError
@@ -84,6 +85,10 @@ class CommitResult:
         diverged: True when push failed because the branch is behind remote.
         push_error: Lore's push output when push failed, else None.
         output: Lore's commit and push output, for display.
+        revision: The revision this commit made, when Lore printed it.
+        pushed_revision: The newest revision the push sent, when Lore printed it.
+        branch: The branch the push went to, when Lore printed it.
+        server_revision: The remote revision after the call, when it could be read.
     """
 
     committed: bool
@@ -91,6 +96,10 @@ class CommitResult:
     diverged: bool
     push_error: str | None
     output: str
+    revision: int | None = None
+    pushed_revision: int | None = None
+    branch: str | None = None
+    server_revision: int | None = None
 
 
 @dataclass(frozen=True)
@@ -421,9 +430,18 @@ class Session:
         self._drop(self.touched, rels)
         self._drop(self.outputs, rels)
         self._forget_taken(rels)
+        revision = parsers.committed_revision(output)
         if not push:
-            return CommitResult(True, False, False, None, output)
-        return self._push(output)
+            return CommitResult(
+                True,
+                False,
+                False,
+                None,
+                output,
+                revision=revision,
+                server_revision=self._server_revision(),
+            )
+        return self._push(output, revision)
 
     def retry_push(self) -> CommitResult:
         """Push existing local commits again after a failed push.
@@ -432,9 +450,16 @@ class Session:
         remembered in this session it only pushes. `committed` is True because
         the local commits already exist.
         """
-        return self._push("")
+        return self._push("", None)
 
-    def _push(self, output: str) -> CommitResult:
+    def _server_revision(self) -> int | None:
+        try:
+            return self.lore.revision_status().remote_revision
+        except LoreError as exc:
+            logger.warning("Could not read the server revision: %s", exc)
+            return None
+
+    def _push(self, output: str, revision: int | None) -> CommitResult:
         with self._lock:
             pending = list(self._pending)
         try:
@@ -443,7 +468,12 @@ class Session:
             error = exc.output.strip() or str(exc)
             logger.warning("Push failed: %s", error)
             return CommitResult(
-                True, False, "Branch has diverged" in exc.output, error, _join(output, error)
+                True,
+                False,
+                "Branch has diverged" in exc.output,
+                error,
+                _join(output, error),
+                revision=revision,
             )
         with self._lock:
             self._pending.clear()
@@ -453,7 +483,18 @@ class Session:
         except LoreError as exc:
             logger.warning("Lock cleanup after push failed: %s", exc)
             output = _join(output, f"Pushed, but lock cleanup failed: {exc}")
-        return CommitResult(True, True, False, None, output)
+        pushed = parsers.pushed_revision(pushed_output)
+        return CommitResult(
+            True,
+            True,
+            False,
+            None,
+            output,
+            revision=revision,
+            pushed_revision=pushed.revision if pushed else None,
+            branch=pushed.branch if pushed else None,
+            server_revision=self._server_revision(),
+        )
 
     def _after_push(self, pending: list[_Pending]) -> None:
         everything = list(dict.fromkeys(p for commit in pending for p in commit.paths))

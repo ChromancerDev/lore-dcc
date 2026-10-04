@@ -30,9 +30,22 @@ HEAD = (
     f"Remote revision 3 -> {SIG}\n"
     "Local branch in sync with remote\n"
 )
+COMMIT_OUT = (
+    "Repository 01a01c890d5c78629798bab981f4d893\n"
+    "Revision  : 4\n"
+    f"Signature : {SIG}\n"
+    "Commit succeeded\n"
+)
+PUSH_OUT = (
+    "Local branch is 1 revision(s) ahead of remote, pushing all revisions\n"
+    "Repository 01a01c890d5c78629798bab981f4d893\n"
+    "Pushed 1 fragment(s), 170.00 bytes\n"
+    f"Pushed revision 4 -> {SIG} to branch main\n"
+)
 VERBS = (
     ("branch", "info"),
     ("status", "--check-dirty"),
+    ("status", "--revision-only"),
     ("lock", "acquire"),
     ("lock", "release"),
     ("lock", "query"),
@@ -114,12 +127,12 @@ class ScriptRunner:
             self.locks = [(p, o) for p, o in self.locks if not (p in rels and o == "Alice")]
         if name == "status":
             return self.status_out
-        if name == "status --check-dirty":
+        if name in ("status --check-dirty", "status --revision-only"):
             return self.check_out
         if name == "commit":
-            return "Committed revision 4\n"
+            return COMMIT_OUT
         if name == "push":
-            return "Pushed\n"
+            return PUSH_OUT
         return ""
 
     def calls(self, name: str) -> list[list[str]]:
@@ -494,6 +507,7 @@ def test_commit_stages_unstages_others_commits_pushes_and_releases(env: Env) -> 
         "auth info", "file info", "lock query", "branch info",
         "stage", "status", "unstage", "commit", "push",
         "status --check-dirty", "file info", "lock query", "lock release", "file info", "lock query",
+        "status --revision-only",
     ]  # fmt: skip
     assert env.runner.calls("stage") == [["a.hip", "b.txt"]]
     assert env.runner.calls("unstage") == [["extra.hip", "newdir"]]
@@ -502,8 +516,10 @@ def test_commit_stages_unstages_others_commits_pushes_and_releases(env: Env) -> 
     assert (result.committed, result.pushed, result.diverged, result.push_error) == (
         True, True, False, None,
     )  # fmt: skip
-    assert "Committed revision 4" in result.output
-    assert "Pushed" in result.output
+    assert "Commit succeeded" in result.output
+    assert "Pushed revision 4" in result.output
+    assert (result.revision, result.pushed_revision, result.branch) == (4, 4, "main")
+    assert result.server_revision == 3
     assert env.session.touched == {"other.hip"}
     assert env.session.outputs == set()
     assert not writable(mine)
@@ -534,6 +550,8 @@ def test_commit_without_push_keeps_locks(env: Env) -> None:
     env.runner.locks = [("a.hip", "Alice")]
     result = env.session.commit(["a.hip"], "Summary", push=False)
     assert (result.committed, result.pushed, result.push_error) == (True, False, None)
+    assert (result.revision, result.pushed_revision, result.branch) == (4, None, None)
+    assert result.server_revision == 3
     assert "push" not in env.runner.verbs()
     assert "lock release" not in env.runner.verbs()
     assert "unstage" not in env.runner.verbs()
@@ -558,7 +576,8 @@ def test_commit_push_diverged_then_retry(env: Env) -> None:
     assert (result.committed, result.pushed, result.diverged) == (True, False, True)
     assert result.push_error is not None
     assert "Branch has diverged" in result.push_error
-    assert "Committed revision 4" in result.output
+    assert "Commit succeeded" in result.output
+    assert (result.revision, result.pushed_revision, result.branch) == (4, None, None)
     assert "lock release" not in env.runner.verbs()
     assert env.session.touched == set()
     assert writable(path)
@@ -568,6 +587,7 @@ def test_commit_push_diverged_then_retry(env: Env) -> None:
     assert (retry.committed, retry.pushed, retry.diverged, retry.push_error) == (
         True, True, False, None,
     )  # fmt: skip
+    assert (retry.revision, retry.pushed_revision, retry.branch) == (None, 4, "main")
     assert env.runner.calls("lock release") == [["a.hip"]]
     assert not writable(path)
     assert env.session.retry_push().pushed
@@ -619,7 +639,7 @@ def test_post_push_clears_pending_commits(env: Env) -> None:
     env.session.commit(["a.hip"], "One")
     env.runner.log.clear()
     assert env.session.retry_push().pushed
-    assert env.runner.verbs() == ["push"]
+    assert env.runner.verbs() == ["push", "status --revision-only"]
 
 
 def test_commit_push_other_failure_is_not_diverged(env: Env) -> None:
@@ -813,3 +833,22 @@ def test_case_sensitive_platforms_keep_exact_matching(
     env.runner.locks = [("A.hip", "Bob")]
     (state,) = env.session.file_states(["a.hip"])
     assert (state.tracked, state.lock) == (False, LockState.NOT_LOCKED)
+
+
+def test_server_revision_is_none_when_the_status_call_fails(env: Env) -> None:
+    env.make("a.hip")
+    env.runner.info = {"a.hip": "Modified"}
+    env.runner.fail["status --revision-only"] = (1, "[Error] no server")
+    result = env.session.commit(["a.hip"], "Summary")
+    assert result.pushed and result.server_revision is None
+    assert (result.revision, result.pushed_revision, result.branch) == (4, 4, "main")
+
+
+def test_unreadable_commit_and_push_output_leaves_the_revisions_none(env: Env) -> None:
+    env.make("a.hip")
+    env.runner.info = {"a.hip": "Modified"}
+    answer = env.runner.answer
+    env.runner.answer = lambda name, rels: "ok" if name in ("commit", "push") else answer(name, rels)
+    result = env.session.commit(["a.hip"], "Summary")
+    assert result.pushed
+    assert (result.revision, result.pushed_revision, result.branch) == (None, None, None)

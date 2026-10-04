@@ -44,12 +44,15 @@ def _reported(func: Callable[..., None]) -> Callable[..., None]:
 def _session(file: Path | str) -> Session | None:
     """Return the Session for `file`, telling the user why when there is none."""
     if not host.load_prefs().enabled:
-        host.message(TITLE, "Lore is turned off. Use Enable/Disable on the Lore shelf to turn it on.")
+        host.message(
+            "Lore - Disabled",
+            "Lore is turned off. Use Enable/Disable in the Lore menu or on the shelf to turn it on.",
+        )
         return None
     try:
         return host.session_for(file)
     except NotAWorkingCopy:
-        host.message(TITLE, "Not a Lore working copy")
+        host.message("Lore - Not a Working Copy", "Not a Lore working copy")
         return None
 
 
@@ -60,7 +63,7 @@ def _hip() -> str:
 def _saved_hip() -> str | None:
     file = _hip()
     if not os.path.isfile(file):
-        host.message(TITLE, "Save the file first.")
+        host.message("Lore - Save File First", "Save the file first.")
         return None
     return file
 
@@ -77,14 +80,16 @@ def _parm_file(parm: Any, *, must_exist: bool = False) -> str | None:
     """Return the absolute file a string parm points at, or None after telling the user why."""
     value = hou.text.expandString(parm.evalAsString())
     if not value.strip():
-        host.message(TITLE, f"The {parm.name()} parameter is empty. Set it to a file first.")
+        host.message(
+            "Lore - Parameter File", f"The {parm.name()} parameter is empty. Set it to a file first."
+        )
         return None
     path = os.path.abspath(value)
     if os.path.isdir(path):
-        host.message(TITLE, f"{path} is a folder. Pick a file.")
+        host.message("Lore - Parameter File", f"{path} is a folder. Pick a file.")
         return None
     if must_exist and not os.path.isfile(path):
-        host.message(TITLE, f"{path} does not exist.")
+        host.message("Lore - Parameter File", f"{path} does not exist.")
         return None
     return path
 
@@ -140,7 +145,10 @@ def toggle_enabled() -> None:
     prefs = host.load_prefs()
     prefs = dataclasses.replace(prefs, enabled=not prefs.enabled)
     host.save_prefs(prefs)
-    host.message(TITLE, "Lore is now enabled." if prefs.enabled else "Lore is now disabled.")
+    if prefs.enabled:
+        host.message("Lore - Enabled", "Lore is now enabled.")
+    else:
+        host.message("Lore - Disabled", "Lore is now disabled.")
 
 
 @_reported
@@ -217,7 +225,7 @@ def lock_node_outputs(node: Any) -> None:
         text = "Already locked by you."
     else:
         text = "Nothing to lock. New files need no lock."
-    host.message(TITLE, _with_notes(text, notes))
+    host.message("Lore - Lock Outputs", _with_notes(text, notes))
 
 
 @_reported
@@ -256,29 +264,32 @@ def _all_mine(session: Session, paths: list[Path]) -> bool:
 def _collect(session: Session, paths: list[Path], notes: list[str]) -> None:
     if not paths:
         host.message(
-            TITLE, _with_notes("This scene writes no files inside the working copy.", notes)
+            "Lore - Collect Outputs",
+            _with_notes("This scene writes no files inside the working copy.", notes),
         )
         return
     result = host.run(session.finish_write, paths, title="Collecting outputs")
-    host.message(TITLE, _with_notes(describe_write(result), notes))
+    host.message("Lore - Collect Outputs", _with_notes(describe_write(result), notes))
 
 
 def _lock_files(session: Session, files: list[str]) -> None:
     host.run(session.lock, files, title="Locking")
     names = ", ".join(_rel(session, f) for f in files)
-    host.message(TITLE, f"Locked {names}.")
+    host.message("Lore - Lock File", f"Locked {names}.")
 
 
 def _discard_files(session: Session, files: list[str], warning: str) -> bool:
     states = host.run(session.file_states, files)
     new = [s.path for s in states if not s.tracked]
     if new:
-        host.message(TITLE, "\n".join(new_file_message(path) for path in new))
+        host.message("Lore - Discard Changes", "\n".join(new_file_message(path) for path in new))
         return False
     names = "\n".join(f"    {_rel(session, f)}" for f in files)
     parts = [f"Discard changes to:\n{names}", warning, "This cannot be undone."]
     text = "\n\n".join(part for part in parts if part)
-    choice = host.ask("Discard changes", text, ["Discard changes", "Cancel"], default="Cancel")
+    choice = host.ask(
+        "Lore - Discard Changes?", text, ["Discard changes", "Cancel"], default="Cancel"
+    )
     if choice != "Discard changes":
         return False
     host.run(session.discard, files, title="Discarding changes")

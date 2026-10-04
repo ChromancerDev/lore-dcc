@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import dataclasses
 import logging
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -60,7 +61,7 @@ def _load_info(session: Session) -> _InfoData:
 class _InfoDialog(QtWidgets.QDialog):
     def __init__(self, session: Session, data: _InfoData, parent: QtWidgets.QWidget | None) -> None:
         super().__init__(parent)
-        self.setWindowTitle("Lore info")
+        self.setWindowTitle("Lore - Info")
         self.setMinimumWidth(480)
         self.values: dict[str, QtWidgets.QLabel] = {}
         status = data.status
@@ -118,7 +119,7 @@ class _CommitDialog(QtWidgets.QDialog):
         parent: QtWidgets.QWidget | None = None,
     ) -> None:
         super().__init__(parent)
-        self.setWindowTitle("Commit")
+        self.setWindowTitle("Lore - Commit")
         self.resize(780, 600)
         self._session = session
         self._rows = rows
@@ -314,17 +315,20 @@ class _CommitDialog(QtWidgets.QDialog):
     def _on_retry(self) -> None:
         result = self._run("Push", self._session.retry_push)
         if result is not None:
+            if result.revision is None and self.outcome is not None:
+                result = dataclasses.replace(result, revision=self.outcome.revision)
             self._apply_result(result)
 
     def _apply_result(self, result: CommitResult) -> None:
         if not result.committed:
-            show_message("Commit", result.output or "Nothing was committed.")
+            show_message("Lore - Commit", result.output or "Nothing was committed.")
             return
         self.outcome = result
         push_failed = not result.pushed and (self._push_requested or result.push_error is not None)
         if push_failed:
             self._enter_retry_state(result)
         else:
+            show_message("Lore - Commit Complete", commit_model.commit_complete_text(result))
             self.accept()
 
     def _enter_retry_state(self, result: CommitResult) -> None:
@@ -352,6 +356,9 @@ def show_commit(session: Session) -> CommitResult | None:
     Groups: This session (session.touched), Outputs (session.outputs), Other
     changes, Cannot commit (FileState.blocked, disabled with the reason).
 
+    After a successful commit the dialog shows a Commit Complete message with
+    the revision numbers, so callers need not report it again.
+
     If the revision was made but the push failed and the user closes the
     dialog, the committed-but-not-pushed result is returned so the caller knows
     a local revision exists.
@@ -362,7 +369,7 @@ def show_commit(session: Session) -> CommitResult | None:
         show_error(exc, "Could not read changes")
         return None
     if not rows:
-        show_message("Commit", "There are no changes to commit.")
+        show_message("Lore - Commit", "There are no changes to commit.")
         return None
     dialog = _CommitDialog(session, status, rows, _load_prefs(), parent_window())
     dialog.exec()

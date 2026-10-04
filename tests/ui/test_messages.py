@@ -88,3 +88,32 @@ def test_ask_returns_clicked_label(qapp, monkeypatch) -> None:
 def test_ask_returns_none_when_closed(qapp, monkeypatch) -> None:
     monkeypatch.setattr(QtWidgets.QMessageBox, "exec", lambda self: 0)
     assert messages.ask("Q", "Stage?", ["Yes", "No"]) is None
+
+
+@pytest.mark.parametrize(
+    ("given", "shown"),
+    [
+        ("Stage New File?", "Lore - Stage New File?"),
+        ("Lore - Lock File?", "Lore - Lock File?"),
+        ("Lore", "Lore - Info"),
+        ("", "Lore - Info"),
+    ],
+)
+def test_window_title_always_starts_with_the_lore_prefix(given: str, shown: str) -> None:
+    assert ui.window_title(given) == shown
+
+
+def test_every_box_title_starts_with_the_lore_prefix(qapp) -> None:
+    titles = [
+        messages._error_box(ValueError("x"), "").windowTitle(),
+        messages._ask_box("Stage?", "t", ["Yes"], None).windowTitle(),
+        messages._box(QtWidgets.QMessageBox.Icon.Information, "Info", "t").windowTitle(),
+        messages._box(QtWidgets.QMessageBox.Icon.Information, "Lore", "t").windowTitle(),
+    ]
+    assert titles == ["Lore - Error", "Lore - Stage?", "Lore - Info", "Lore - Info"]
+
+
+def test_busy_dialog_title_starts_with_the_lore_prefix(qapp) -> None:
+    from lore_dcc.ui import tasks
+
+    assert tasks._BusyDialog("Locking", None).windowTitle() == "Lore - Locking"

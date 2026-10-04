@@ -313,3 +313,43 @@ def test_branch_info_optional_keys_may_be_absent() -> None:
 def test_branch_info_fails_closed(text: str) -> None:
     with pytest.raises(LoreOutputError):
         parsers.parse_branch_info(text)
+
+
+COMMIT_OUT = f"""\
+Repository 01a01c890d5c78629798bab981f4d893
+Revision  : 3
+Signature : {SIG}
+Commit succeeded
+"""
+
+PUSH_OUT = f"""\
+Local branch is 1 revision(s) ahead of remote, pushing all revisions
+Repository 01a01c890d5c78629798bab981f4d893
+Pushing 1 fragment(s)
+Pushed 1 fragment(s), 170.00 bytes
+Pushing 775e00ea... to branch main
+Pushed revision 3 -> {SIG} to branch main
+"""
+
+
+def test_committed_revision_reads_the_revision_line() -> None:
+    assert parsers.committed_revision(COMMIT_OUT) == 3
+
+
+@pytest.mark.parametrize("text", ["", "Commit succeeded\n", "Revision  : x\n", "Revision : \n"])
+def test_committed_revision_is_none_when_the_line_is_missing_or_odd(text: str) -> None:
+    assert parsers.committed_revision(text) is None
+
+
+def test_pushed_revision_reads_revision_and_branch() -> None:
+    assert parsers.pushed_revision(PUSH_OUT) == parsers.PushedRevision(3, SIG, "main")
+
+
+def test_pushed_revision_takes_the_last_of_several() -> None:
+    text = f"Pushed revision 3 -> {SIG} to branch dev\nPushed revision 4 -> {SIG} to branch dev\n"
+    assert parsers.pushed_revision(text) == parsers.PushedRevision(4, SIG, "dev")
+
+
+@pytest.mark.parametrize("text", ["", "Pushed 1 fragment(s)\n", "Pushed revision 3 to branch main\n"])
+def test_pushed_revision_is_none_when_the_line_is_missing_or_odd(text: str) -> None:
+    assert parsers.pushed_revision(text) is None

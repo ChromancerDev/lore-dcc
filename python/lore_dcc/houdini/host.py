@@ -50,7 +50,7 @@ def save_prefs(prefs: Prefs) -> None:
     prefs_module.save_prefs(prefs_folder(), prefs)
 
 
-def run[T](fn: Callable[..., T], *args: object, title: str = "Lore") -> T:
+def run[T](fn: Callable[..., T], *args: object, title: str = "Working") -> T:
     """Run a Lore call off the main thread in the UI, inline without one.
 
     `fn` must not touch `hou`.

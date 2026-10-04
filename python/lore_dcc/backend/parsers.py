@@ -20,6 +20,10 @@ _REMOTE_REVISION = re.compile(r"^Remote revision (?P<rev>\d+) -> (?P<sig>[0-9a-f
 _CHANGE = re.compile(r"^(?P<code>[MAD]) (?P<path>.+)$")
 _LOCK = re.compile(r"^(?P<path>.+) by (?P<owner>.+?) on branch (?P<branch>\S+)$")
 _BRANCH = re.compile(r"^Branch (?P<name>\S.*)$")
+_COMMITTED_REVISION = re.compile(r"^Revision\s*:\s*(?P<rev>\d+)$")
+_PUSHED_REVISION = re.compile(
+    r"^Pushed revision (?P<rev>\d+) -> (?P<sig>[0-9a-f]+) to branch (?P<branch>\S+)$"
+)
 BRANCH_INFO_KEYS = ("ID", "Latest", "Remote Latest", "Creator", "Created")
 
 
@@ -153,6 +157,44 @@ class BranchInfo:
     remote_latest: str | None
     creator: str | None
     created: str | None
+
+
+@dataclass(frozen=True)
+class PushedRevision:
+    """The `Pushed revision N -> <signature> to branch <name>` line of `lore push`.
+
+    Attributes:
+        revision: The pushed revision number.
+        signature: The revision signature as printed.
+        branch: The branch name the revision went to.
+    """
+
+    revision: int
+    signature: str
+    branch: str
+
+
+def committed_revision(text: str) -> int | None:
+    """Return the revision number from `lore commit` output, or None when absent.
+
+    Reads the `Revision  : N` line. It feeds a message, so it never raises.
+    """
+    for line in text.splitlines():
+        if match := _COMMITTED_REVISION.match(line.strip()):
+            return int(match["rev"])
+    return None
+
+
+def pushed_revision(text: str) -> PushedRevision | None:
+    """Return the last pushed revision in `lore push` output, or None when absent.
+
+    It feeds a message, so it never raises.
+    """
+    found: PushedRevision | None = None
+    for line in text.splitlines():
+        if match := _PUSHED_REVISION.match(line.strip()):
+            found = PushedRevision(int(match["rev"]), match["sig"], match["branch"])
+    return found
 
 
 def parse_version(text: str) -> tuple[int, int, int]:
