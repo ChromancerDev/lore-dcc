@@ -5,13 +5,16 @@ and Post-Render to `from lore_dcc.houdini import api; api.post_render()`.
 A script that writes files itself calls `api.lock(paths)` before writing and
 `api.stage(paths)` after.
 
-In Houdini's UI a failure shows a dialog. In hython and batch renders it is
-raised, so the job stops before it writes over a file someone else locked.
+For the render helpers, a failure shows a dialog in Houdini's UI and is
+raised in hython and batch renders, so the render stops before it writes over
+a file someone else locked. `lock` and `stage` always raise, after the dialog
+in the UI, so the calling script stops too.
 """
 
 from __future__ import annotations
 
 import logging
+import os
 from collections.abc import Callable, Iterable
 from pathlib import Path
 from typing import Any
@@ -21,10 +24,11 @@ import hou
 from lore_dcc.errors import NotAWorkingCopy
 from lore_dcc.houdini import host, outputs
 from lore_dcc.session import Session, WriteResult
+from lore_dcc.workspace import find_workspace
 
 logger = logging.getLogger(__name__)
 
-Paths = str | Path | Iterable[str | Path]
+Paths = str | os.PathLike | Iterable[str | os.PathLike]
 
 
 def pre_render(node: Any = None) -> tuple[str, ...]:
@@ -55,25 +59,39 @@ def lock(paths: Paths) -> tuple[str, ...]:
 
     Args:
         paths: One path or several, absolute or with variables such as
-            `$HIP/geo/out.bgeo.sc`. Paths outside the working copy are ignored.
+            `$HIP/geo/out.bgeo.sc`. A relative path resolves against Houdini's
+            working folder, not the scene. Paths outside every Lore working
+            copy are ignored.
 
     Returns:
         The repo-relative paths this call locked.
+
+    Raises:
+        LoreError: A lock was refused or Lore failed. In the UI a dialog shows
+            first. Either way the error stops the script before it writes.
     """
-    return _files(paths, (), lambda s, p: s.prepare_write(p), "Locking files")
+    results = _files(paths, lambda s, p: s.prepare_write(p), "Locking files")
+    return tuple(p for result in results for p in result)
 
 
 def stage(paths: Paths) -> WriteResult | None:
     """Report files a script wrote: stage new ones, release the locks on unchanged ones.
 
     Changed tracked files keep their lock and wait for Commit, like
-    `post_render`.
+    `post_render`. Returns None when no path is in a working copy.
 
     Args:
-        paths: One path or several, absolute or with variables such as
-            `$HIP/tex/albedo.exr`. Paths outside the working copy are ignored.
+        paths: As for `lock`.
+
+    Raises:
+        LoreError: As for `lock`; for example a new file someone else locked.
     """
-    return _files(paths, None, lambda s, p: s.finish_write(p), "Collecting files")
+    results = _files(paths, lambda s, p: s.finish_write(p), "Collecting files")
+    if not results:
+        return None
+    return WriteResult(
+        *(tuple(p for r in results for p in getattr(r, f)) for f in ("staged", "changed", "released"))
+    )
 
 
 def _node[T](node: Any, empty: T, step: Callable[[Session, list[Path]], T], title: str) -> T:
@@ -82,19 +100,29 @@ def _node[T](node: Any, empty: T, step: Callable[[Session, list[Path]], T], titl
     )
 
 
-def _files[T](paths: Paths, empty: T, step: Callable[[Session, list[Path]], T], title: str) -> T:
-    values = [paths] if isinstance(paths, str | Path) else list(paths)
-    files = [hou.text.expandString(str(value)) for value in values]
-    if not files:
-        return empty
-    return _run(
-        files[0],
-        lambda s: outputs.paths_in_working_copy(files, s.workspace.root),
-        empty,
-        step,
-        title,
-        files[0],
-    )
+def _files[T](paths: Paths, step: Callable[[Session, list[Path]], T], title: str) -> list[T]:
+    try:
+        if not host.load_prefs().enabled:
+            return []
+        values = [paths] if isinstance(paths, str | os.PathLike) else list(paths)
+        groups: dict[Path, list[str]] = {}
+        for value in values:
+            file = hou.text.expandString(os.fspath(value))
+            try:
+                groups.setdefault(find_workspace(Path(file)).root, []).append(file)
+            except NotAWorkingCopy:
+                continue
+        results = []
+        for files in groups.values():
+            session = host.session_for(files[0])
+            found = outputs.paths_in_working_copy(files, session.workspace.root)
+            results.append(host.run(step, session, found, title=title))
+        return results
+    except Exception as exc:
+        if host.has_ui():
+            logger.exception("Lore %s failed", title.lower())
+            host.error(exc, title)
+        raise
 
 
 def _run[T](

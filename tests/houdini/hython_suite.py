@@ -311,10 +311,14 @@ fake.forget()
 check(api.pre_render(elsewhere) == () and fake.calls == [], "outputs outside the working copy are ignored")
 
 fake.forget()
-exported = [work / "export" / "a.fbx", "$HIP/tex/b.exr", str(outside / "c.fbx")]
+(work / ".lore").mkdir(exist_ok=True)
+exported = [str(outside / "c.fbx"), work / "export" / "a.fbx", "$HIP/tex/b.exr"]
 check(len(api.lock(exported)) == 2, "lock returns what the session locked")
 wanted = [norm(work / "export" / "a.fbx"), norm(work / "tex" / "b.exr")]
-check(fake.paths("prepare_write") == wanted, "lock expands $HIP and drops paths outside the working copy")
+check(
+    fake.paths("prepare_write") == wanted,
+    "lock expands $HIP and drops paths outside the working copy, even listed first",
+)
 check(isinstance(api.stage(work / "export" / "a.fbx"), WriteResult), "stage takes one path")
 check(fake.paths("finish_write") == wanted[:1], "stage reports the written file")
 fake.forget()
@@ -333,6 +337,12 @@ except RuntimeError:
     check(True, "pre_render raises without a UI so the render stops")
 else:
     check(False, "pre_render raises without a UI so the render stops")
+try:
+    api.lock(work / "export" / "a.fbx")
+except RuntimeError:
+    check(True, "a refused lock raises so the script stops")
+else:
+    check(False, "a refused lock raises so the script stops")
 
 # 7. Reference scan and reload.
 sops = hou.node("/obj/geo1")
