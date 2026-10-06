@@ -35,7 +35,7 @@ The package only enables itself in Houdini 22 or newer. The plugin needs no othe
 | `Lore` shelf | Info, Enable/Disable, Lock, Discard changes, Collect Outputs, Sync Dependencies, Commit |
 | Node right-click, `Lore` | Lock and Discard changes on an asset's library file. Lock Outputs and Collect Outputs on ROPs and File Caches. |
 | Parameter right-click, `Lore` | Lock and Discard changes on the file a string parameter names |
-| Saving | Before saving an unlocked tracked file: "Lore - Lock File?". After saving a new file: "Lore - Stage New File?". Saving over a file someone else locked: "Lore - File Locked by Another User". Turn the prompts off in `lore_dcc_prefs.json` in your Houdini user folder. |
+| Saving | Before saving an unlocked tracked file: "Lore - Lock File?". After saving a new file: "Lore - Stage New File?". Saving over a file someone else locked: "Lore - File Locked by Another User", once per file. Turn the prompts off in `lore_dcc_prefs.json` in your Houdini user folder. |
 | After Commit | `Lore - Commit Complete` names the committed revision, the branch it was pushed to and the revision the server is at. |
 | Opening a hip | Checks in the background whether any file the scene reads is newer on the server, and offers `Sync Dependencies` when one is. |
 
@@ -47,7 +47,7 @@ Every file a scene reads, such as File SOP caches, Alembic and FBX files, textur
 
 Lore's scoped sync moves the whole working copy to the server's revision but writes only the files it syncs. Other files that changed on the server keep their old content, `lore status` does not show them, and later syncs do not update them. After that, only `lore file reset <file>` brings such a file up to date, and editing and committing it overwrites the newer version on the server. When you can, run a full `lore sync` outside Houdini instead.
 
-Tracked hip, HDA and cache files are read-only on disk unless you hold their lock. To make a ROP lock its own outputs, set its Pre-Render Script and Post-Render Script to Python:
+A hip, HDA or cache file that someone else locked cannot be staged or committed, and neither can one whose lock state Lore could not read. To make a ROP lock its own outputs, set its Pre-Render Script and Post-Render Script to Python:
 
 ```python
 import lore_dcc.houdini.api as lore; lore.pre_render()

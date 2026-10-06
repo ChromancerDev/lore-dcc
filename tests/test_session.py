@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import os
-import stat
 import subprocess
 import threading
 from pathlib import Path
@@ -187,12 +185,10 @@ class Env:
         workspace = Workspace(root=self.root, remote_url=None, identity=None)
         self.session = Session(workspace, lore, load_settings(self.root))
 
-    def make(self, rel: str, read_only: bool = False) -> Path:
+    def make(self, rel: str) -> Path:
         path = self.root / rel
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_bytes(b"x")
-        mode = stat.S_IREAD if read_only else stat.S_IREAD | stat.S_IWRITE
-        os.chmod(path, mode)
         return path
 
     def lock_query_fails(self) -> None:
@@ -202,10 +198,6 @@ class Env:
 @pytest.fixture
 def env(tmp_path: Path) -> Env:
     return Env(tmp_path)
-
-
-def writable(path: Path) -> bool:
-    return bool(os.stat(path).st_mode & stat.S_IWRITE)
 
 
 def test_file_states_order_lock_states_and_missing(env: Env) -> None:
@@ -255,21 +247,19 @@ def test_identity_cached_and_empty_input_runs_nothing(env: Env) -> None:
     assert env.session.identity().owns("abc123")
 
 
-def test_lock_stages_untracked_and_clears_read_only(env: Env) -> None:
-    tracked = env.make("a.hip", read_only=True)
-    new = env.make("new.hip")
+def test_lock_stages_untracked(env: Env) -> None:
+    env.make("a.hip")
+    env.make("new.hip")
     env.runner.info = {"a.hip": "-", "new.hip": "Added"}
     states = env.session.lock(["a.hip", "new.hip"])
     assert env.runner.calls("lock acquire") == [["a.hip", "new.hip"]]
     assert env.runner.calls("stage") == [["new.hip"]]
-    assert writable(tracked)
-    assert writable(new)
     assert env.session.touched == {"a.hip", "new.hip"}
     assert [s.path for s in states] == ["a.hip", "new.hip"]
 
 
 def test_lock_reads_file_info_before_acquiring(env: Env) -> None:
-    env.make("a.hip", read_only=True)
+    env.make("a.hip")
     env.runner.fail["file info"] = (255, "[Error] boom\n")
     with pytest.raises(LoreCommandError):
         env.session.lock(["a.hip"])
@@ -287,37 +277,33 @@ def test_lock_not_acquired_raises_before_staging(env: Env) -> None:
     assert env.session.touched == set()
 
 
-def test_release_reapplies_read_only(env: Env) -> None:
-    path = env.make("a.hip")
+def test_release_releases_the_lock(env: Env) -> None:
+    env.make("a.hip")
     env.runner.info = {"a.hip": "-"}
     env.runner.locks = [("a.hip", "Alice")]
     env.session.release(["a.hip"])
     assert env.runner.calls("lock release") == [["a.hip"]]
-    assert not writable(path)
 
 
-def test_discard_resets_releases_only_own_locks_and_reapplies(env: Env) -> None:
-    mine = env.make("a.hip")
-    theirs = env.make("b.hip", read_only=True)
+def test_discard_resets_and_releases_only_own_locks(env: Env) -> None:
+    env.make("a.hip")
+    env.make("b.hip")
     env.runner.info = {"a.hip": "Modified", "b.hip": "-"}
     env.runner.locks = [("a.hip", "Alice"), ("b.hip", "Bob")]
     env.session.touched.update({"a.hip", "b.hip"})
     env.session.discard(["a.hip", "b.hip"])
     assert env.runner.calls("file reset") == [["a.hip", "b.hip"]]
     assert env.runner.calls("lock release") == [["a.hip"]]
-    assert not writable(mine)
-    assert not writable(theirs)
     assert env.session.touched == set()
 
 
 def test_discard_with_unknown_locks_does_not_release(env: Env) -> None:
-    path = env.make("a.hip")
+    env.make("a.hip")
     env.runner.info = {"a.hip": "Modified"}
     env.lock_query_fails()
     env.session.discard(["a.hip"])
     assert env.runner.calls("file reset") == [["a.hip"]]
     assert "lock release" not in env.runner.verbs()
-    assert writable(path)
 
 
 def test_discard_refuses_new_files_before_running_lore(env: Env) -> None:
@@ -330,11 +316,44 @@ def test_discard_refuses_new_files_before_running_lore(env: Env) -> None:
     assert "lock release" not in env.runner.verbs()
 
 
-def test_make_writable_and_missing_file(env: Env) -> None:
-    path = env.make("a.hip", read_only=True)
-    env.session.make_writable(["a.hip", "gone.hip"])
-    assert writable(path)
-    assert env.runner.log == []
+@pytest.mark.parametrize("failure", ["other", "unknown"])
+def test_stage_refuses_blocked_files(env: Env, failure: str) -> None:
+    env.make("a.hip")
+    env.make("b.hip")
+    env.runner.info = {"a.hip": "-", "b.hip": "-"}
+    if failure == "other":
+        env.runner.locks = [("b.hip", "Bob")]
+    else:
+        env.lock_query_fails()
+    with pytest.raises(CommitBlocked) as info:
+        env.session.stage(["a.hip", "b.hip"])
+    assert "b.hip" in info.value.paths
+    assert "cannot be staged or committed" in str(info.value)
+    assert ("locked by Bob" if failure == "other" else "lock state unknown") in str(info.value)
+    assert "stage" not in env.runner.verbs()
+    assert env.session.touched == set()
+
+
+def test_lock_refuses_to_stage_an_untracked_file_with_unknown_lock_state(env: Env) -> None:
+    env.make("new.hip")
+    env.runner.info = {"new.hip": "Added"}
+    env.lock_query_fails()
+    with pytest.raises(CommitBlocked):
+        env.session.lock(["new.hip"])
+    assert "stage" not in env.runner.verbs()
+
+
+def test_finish_write_refuses_a_blocked_new_file_before_staging_or_releasing(env: Env) -> None:
+    env.make("new.bgeo.sc")
+    env.make("same.bgeo.sc")
+    env.runner.info = {"new.bgeo.sc": "Added", "same.bgeo.sc": "-"}
+    env.session.prepare_write(["same.bgeo.sc"])
+    env.runner.locks = [("new.bgeo.sc", "Bob"), ("same.bgeo.sc", "Alice")]
+    with pytest.raises(CommitBlocked) as info:
+        env.session.finish_write(["new.bgeo.sc", "same.bgeo.sc"])
+    assert info.value.paths == ["new.bgeo.sc"]
+    assert "stage" not in env.runner.verbs()
+    assert "lock release" not in env.runner.verbs()
 
 
 def test_stage_and_mark_saved(env: Env) -> None:
@@ -348,38 +367,8 @@ def test_stage_and_mark_saved(env: Env) -> None:
     assert env.runner.verbs().count("stage") == 1
 
 
-def test_refresh_read_only_rule(env: Env) -> None:
-    free = env.make("free.hip")
-    mine = env.make("mine.hip", read_only=True)
-    other = env.make("other.hip")
-    new = env.make("new.hip")
-    plain = env.make("notes.txt")
-    env.runner.info = {
-        "free.hip": "-", "mine.hip": "-", "other.hip": "-", "new.hip": "Added", "notes.txt": "-",
-    }  # fmt: skip
-    env.runner.locks = [("mine.hip", "Alice"), ("other.hip", "Bob")]
-    env.session.refresh_read_only(
-        ["free.hip", "mine.hip", "other.hip", "new.hip", "notes.txt", "gone.hip"]
-    )
-    assert not writable(free)
-    assert writable(mine)
-    assert not writable(other)
-    assert writable(new)
-    assert writable(plain)
-
-
-def test_refresh_read_only_unknown_leaves_bits_alone(env: Env) -> None:
-    ro = env.make("ro.hip", read_only=True)
-    rw = env.make("rw.hip")
-    env.runner.info = {"ro.hip": "-", "rw.hip": "-"}
-    env.lock_query_fails()
-    env.session.refresh_read_only(["ro.hip", "rw.hip"])
-    assert not writable(ro)
-    assert writable(rw)
-
-
 def test_prepare_write_locks_only_tracked_lockable_not_mine(env: Env) -> None:
-    free = env.make("free.bgeo.sc", read_only=True)
+    env.make("free.bgeo.sc")
     env.make("mine.bgeo.sc")
     env.make("new.bgeo.sc")
     env.make("notes.txt")
@@ -392,7 +381,6 @@ def test_prepare_write_locks_only_tracked_lockable_not_mine(env: Env) -> None:
     )
     assert locked == ("free.bgeo.sc",)
     assert env.runner.calls("lock acquire") == [["free.bgeo.sc"]]
-    assert writable(free)
     assert env.session.touched == {"free.bgeo.sc"}
 
 
@@ -406,7 +394,7 @@ def test_prepare_write_nothing_to_do_runs_no_acquire(env: Env) -> None:
 
 def test_prepare_write_refuses_other_locks_before_acquiring(env: Env) -> None:
     env.make("free.bgeo.sc")
-    env.make("theirs.bgeo.sc", read_only=True)
+    env.make("theirs.bgeo.sc")
     env.runner.info = {"free.bgeo.sc": "-", "theirs.bgeo.sc": "-"}
     env.runner.locks = [("theirs.bgeo.sc", "Bob")]
     with pytest.raises(LockNotAcquired) as info:
@@ -426,7 +414,7 @@ def test_prepare_write_unknown_lock_state_still_attempts(env: Env) -> None:
 def test_finish_write_three_way_split(env: Env) -> None:
     env.make("new.bgeo.sc")
     env.make("changed.bgeo.sc")
-    same = env.make("same.bgeo.sc", read_only=True)
+    env.make("same.bgeo.sc")
     env.runner.info = {"new.bgeo.sc": "Added", "changed.bgeo.sc": "-", "same.bgeo.sc": "-"}
     env.session.prepare_write(["changed.bgeo.sc", "same.bgeo.sc"])
     env.runner.locks = [("changed.bgeo.sc", "Alice"), ("same.bgeo.sc", "Alice")]
@@ -445,15 +433,13 @@ def test_finish_write_three_way_split(env: Env) -> None:
     assert env.runner.calls("status --check-dirty") == [on_disk]
     assert env.runner.calls("stage") == [["new.bgeo.sc"]]
     assert env.runner.calls("lock release") == [["same.bgeo.sc"]]
-    assert not writable(same)
     assert env.session.outputs == {"new.bgeo.sc", "changed.bgeo.sc"}
     assert env.session.touched == {"new.bgeo.sc", "changed.bgeo.sc", "same.bgeo.sc"}
 
 
 def test_finish_write_releases_only_locks_prepare_write_took(env: Env) -> None:
-    held_before = env.make("before.bgeo.sc")
-    via_lock = env.make("lock.bgeo.sc")
-    taken = env.make("taken.bgeo.sc")
+    for name in ("before.bgeo.sc", "lock.bgeo.sc", "taken.bgeo.sc"):
+        env.make(name)
     env.runner.info = {"before.bgeo.sc": "-", "lock.bgeo.sc": "-", "taken.bgeo.sc": "-"}
     env.session.lock(["lock.bgeo.sc"])
     env.runner.locks = [("before.bgeo.sc", "Alice"), ("lock.bgeo.sc", "Alice")]
@@ -464,9 +450,6 @@ def test_finish_write_releases_only_locks_prepare_write_took(env: Env) -> None:
     result = env.session.finish_write(["before.bgeo.sc", "lock.bgeo.sc", "taken.bgeo.sc"])
     assert result.released == ("taken.bgeo.sc",)
     assert env.runner.calls("lock release") == [["taken.bgeo.sc"]]
-    assert writable(held_before)
-    assert writable(via_lock)
-    assert not writable(taken)
 
 
 def test_taken_locks_are_forgotten_on_release_commit_and_discard(env: Env) -> None:
@@ -529,7 +512,7 @@ def test_commit_blocked(env: Env, failure: str) -> None:
 
 
 def test_commit_stages_unstages_others_commits_pushes_and_releases(env: Env) -> None:
-    mine = env.make("a.hip")
+    env.make("a.hip")
     env.make("b.txt")
     env.runner.info = {"a.hip": "Modified", "b.txt": "-"}
     env.runner.locks = [("a.hip", "Alice")]
@@ -542,7 +525,7 @@ def test_commit_stages_unstages_others_commits_pushes_and_releases(env: Env) -> 
     assert env.runner.verbs() == [
         "auth info", "file info", "lock query", "branch info",
         "stage", "status", "unstage", "commit", "push",
-        "status --check-dirty", "file info", "lock query", "lock release", "file info", "lock query",
+        "status --check-dirty", "file info", "lock query", "lock release",
         "status --revision-only",
     ]  # fmt: skip
     assert env.runner.calls("stage") == [["a.hip", "b.txt"]]
@@ -556,7 +539,6 @@ def test_commit_stages_unstages_others_commits_pushes_and_releases(env: Env) -> 
     assert result.server_revision == 3
     assert env.session.touched == {"other.hip"}
     assert env.session.outputs == set()
-    assert not writable(mine)
 
 
 def test_commit_unstages_only_folders_without_included_files(env: Env) -> None:
@@ -591,18 +573,17 @@ def test_commit_without_push_keeps_locks(env: Env) -> None:
     assert "unstage" not in env.runner.verbs()
 
 
-def test_commit_keep_locked_skips_release_but_refreshes_read_only(env: Env) -> None:
-    path = env.make("a.hip")
+def test_commit_keep_locked_skips_release(env: Env) -> None:
+    env.make("a.hip")
     env.runner.info = {"a.hip": "Modified"}
     env.runner.locks = [("a.hip", "Alice")]
     result = env.session.commit(["a.hip"], "Summary", keep_locked=True)
     assert result.pushed
     assert "lock release" not in env.runner.verbs()
-    assert writable(path)
 
 
 def test_commit_push_diverged_then_retry(env: Env) -> None:
-    path = env.make("a.hip")
+    env.make("a.hip")
     env.runner.info = {"a.hip": "Modified"}
     env.runner.locks = [("a.hip", "Alice")]
     env.runner.fail["push"] = (255, "[Error] Branch has diverged, sync to merge remote changes\n")
@@ -614,21 +595,19 @@ def test_commit_push_diverged_then_retry(env: Env) -> None:
     assert (result.revision, result.pushed_revision, result.branch) == (4, None, None)
     assert "lock release" not in env.runner.verbs()
     assert env.session.touched == set()
-    assert writable(path)
 
     del env.runner.fail["push"]
     retry = env.session.retry_push()
     assert (retry.pushed, retry.diverged, retry.push_error) == (True, False, None)
     assert (retry.revision, retry.pushed_revision, retry.branch) == (None, 4, "main")
     assert env.runner.calls("lock release") == [["a.hip"]]
-    assert not writable(path)
     assert env.session.retry_push().pushed
     assert env.runner.calls("lock release") == [["a.hip"]]
 
 
 def test_post_push_release_follows_each_commit_keep_locked(env: Env) -> None:
-    release = env.make("release.hip")
-    keep = env.make("keep.hip")
+    env.make("release.hip")
+    env.make("keep.hip")
     env.runner.info = {"release.hip": "Modified", "keep.hip": "Modified"}
     env.runner.locks = [("release.hip", "Alice"), ("keep.hip", "Alice")]
     env.runner.fail["push"] = (6, "[Error] Disconnected from server\n")
@@ -637,13 +616,11 @@ def test_post_push_release_follows_each_commit_keep_locked(env: Env) -> None:
     del env.runner.fail["push"]
     assert env.session.retry_push().pushed
     assert env.runner.calls("lock release") == [["release.hip"]]
-    assert not writable(release)
-    assert writable(keep)
 
 
 def test_post_push_release_skips_files_edited_since_the_commit(env: Env) -> None:
-    edited = env.make("edited.hip")
-    clean = env.make("clean.hip")
+    env.make("edited.hip")
+    env.make("clean.hip")
     env.runner.info = {"edited.hip": "Modified", "clean.hip": "Modified"}
     env.runner.locks = [("edited.hip", "Alice"), ("clean.hip", "Alice")]
     env.runner.check_out = HEAD + "Changes not staged for commit:\nM edited.hip\n"
@@ -651,8 +628,6 @@ def test_post_push_release_skips_files_edited_since_the_commit(env: Env) -> None
     assert result.pushed
     assert env.runner.calls("status --check-dirty") == [["edited.hip", "clean.hip"]]
     assert env.runner.calls("lock release") == [["clean.hip"]]
-    assert writable(edited)
-    assert not writable(clean)
 
 
 def test_post_push_keeps_a_lock_any_commit_asked_to_keep(env: Env) -> None:
@@ -991,7 +966,8 @@ def test_stage_updates_links_of_a_remembered_scene(env: Env) -> None:
 def test_stage_without_remembered_references_adds_no_links(env: Env) -> None:
     env.make("a.hip")
     env.session.stage(["a.hip"])
-    assert env.runner.verbs() == ["stage"]
+    assert not [v for v in env.runner.verbs() if v.startswith("file dependency")]
+    assert env.runner.calls("stage") == [["a.hip"]]
 
 
 def test_commit_links_untracked_references_that_are_included(env: Env) -> None:
@@ -1071,14 +1047,6 @@ def test_sync_references_with_every_root_blocked_does_not_sync(env: Env) -> None
     assert "sync" not in env.runner.verbs()
 
 
-def test_sync_references_reapplies_read_only_after_the_sync(env: Env) -> None:
-    path = env.make("a.hip")
-    env.runner.info = {"a.hip": "-"}
-    env.session.sync_references(["a.hip"])
-    assert env.runner.verbs().index("file info") > env.runner.verbs().index("sync")
-    assert not writable(path)
-
-
 def test_update_links_removes_a_link_to_a_reference_no_longer_staged(env: Env) -> None:
     link_env(env, ["new.bgeo"])
     env.make("new.bgeo")
@@ -1102,20 +1070,3 @@ def test_behind_skips_a_branch_that_is_not_behind(env: Env, note: str) -> None:
     env.runner.diff_out = "M a.bgeo\n"
     assert env.session.behind("scene.hip") == session_module.BehindReport(False, ())
     assert "revision diff" not in env.runner.verbs()
-
-
-def test_sync_references_makes_roots_writable_for_lore_then_read_only_again(env: Env) -> None:
-    path = env.make("a.bgeo", read_only=True)
-    env.runner.info["a.bgeo"] = "-"
-    seen = []
-    real = env.session.lore.sync_roots
-
-    def sync_roots(roots, dry_run=False):
-        if not dry_run:
-            seen.append(writable(path))
-        return real(roots, dry_run)
-
-    env.session.lore.sync_roots = sync_roots
-    env.session.sync_references(["a.bgeo"])
-    assert seen == [True]
-    assert not writable(path)

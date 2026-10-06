@@ -25,8 +25,6 @@ from lore_dcc.locks import (
     classify,
     find_lock,
     path_key,
-    set_read_only,
-    wanted_read_only,
 )
 from lore_dcc.settings import Settings, load_settings
 from lore_dcc.workspace import Workspace, find_workspace
@@ -56,7 +54,7 @@ class FileState:
 
     @property
     def blocked(self) -> bool:
-        """True when this file cannot be committed: someone else's lock, or unknown."""
+        """True when this file cannot be staged or committed: someone else's lock, or unknown."""
         return self.lockable and self.lock in (LockState.LOCKED_BY_OTHER, LockState.UNKNOWN)
 
 
@@ -140,12 +138,32 @@ def new_file_message(path: str) -> str:
     return f"{path} is new. Lore has no committed version to go back to."
 
 
-class CommitBlocked(Exception):
-    """commit() was asked to include files someone else locked or whose lock is unknown."""
+class CommitBlocked(LoreError):
+    """Files someone else locked, or whose lock state is unknown, were to be staged or committed.
 
-    def __init__(self, paths: list[str]) -> None:
-        super().__init__(f"Cannot commit {len(paths)} file(s): {', '.join(paths[:5])}")
-        self.paths = paths
+    Attributes:
+        paths: Repo-relative paths that were refused.
+        lines: One line per path naming who holds its lock.
+    """
+
+    def __init__(self, states: Sequence[FileState]) -> None:
+        self.paths = [s.path for s in states]
+        self.lines = [
+            f"{s.path} (locked by {s.owner})"
+            if s.lock is LockState.LOCKED_BY_OTHER
+            else f"{s.path} (lock state unknown)"
+            for s in states
+        ]
+        super().__init__(
+            f"{len(self.lines)} file(s) cannot be staged or committed: {'; '.join(self.lines[:5])}"
+        )
+
+
+def _refuse_blocked(states: Iterable[FileState]) -> None:
+    """Raise CommitBlocked when any state is blocked. The one guard before every `lore stage`."""
+    blocked = [s for s in states if s.blocked]
+    if blocked:
+        raise CommitBlocked(blocked)
 
 
 class Session:
@@ -244,12 +262,14 @@ class Session:
         return any(not c.is_dir and path_key(c.path) == key for c in self.lore.status().staged)
 
     def lock(self, paths: Sequence[Path | str]) -> list[FileState]:
-        """Lock files, stage the untracked ones, clear their read-only bit.
+        """Lock files and stage the untracked ones.
 
         Returns the states after the operation.
 
         Raises:
             LockNotAcquired: Lore did not report holding every path.
+            CommitBlocked: An untracked file's lock state is unknown. The
+                locks are already held; nothing is staged.
         """
         rels = self._unique(paths)
         if not rels:
@@ -263,22 +283,20 @@ class Session:
             and not ((info := infos.get(path_key(r))) is not None and info.tracked)
         ]
         if untracked:
-            self.lore.stage([self._abs(r) for r in untracked])
-        self._set_read_only(rels, False)
+            self._stage(untracked)
         self._touch(rels)
         return self.file_states(rels)
 
     def release(self, paths: Sequence[Path | str]) -> None:
-        """Release the current user's locks, then reapply the read-only rule."""
+        """Release the current user's locks."""
         rels = self._unique(paths)
         if not rels:
             return
         self.lore.lock_release([self._abs(r) for r in rels])
         self._forget_taken(rels)
-        self.refresh_read_only(rels)
 
     def discard(self, paths: Sequence[Path | str]) -> None:
-        """Reset files to the current revision, release own locks, reapply read-only.
+        """Reset files to the current revision and release own locks.
 
         Raises:
             ValueError: A path is not tracked, so Lore has no committed version
@@ -298,18 +316,18 @@ class Session:
         self._forget_taken(rels)
         self._drop(self.touched, rels)
         self._drop(self.outputs, rels)
-        self.refresh_read_only(rels)
-
-    def make_writable(self, paths: Sequence[Path | str]) -> None:
-        """Clear the read-only bit without a lock, for 'Make writable'."""
-        self._set_read_only(self._unique(paths), False)
 
     def stage(self, paths: Sequence[Path | str]) -> None:
-        """Stage files and add them to touched."""
+        """Stage files and add them to touched.
+
+        Raises:
+            CommitBlocked: A lockable file is locked by someone else or its
+                lock state is unknown. Raised before anything is staged.
+        """
         rels = self._unique(paths)
         if not rels:
             return
-        self.lore.stage([self._abs(r) for r in rels])
+        self._stage(rels)
         self._touch(rels)
         self._link_remembered(rels)
 
@@ -325,17 +343,10 @@ class Session:
             self.lore.dirty([self._abs(r) for r in existing])
         self._touch(rels)
 
-    def refresh_read_only(self, paths: Sequence[Path | str]) -> None:
-        """Apply locks.wanted_read_only to each existing file."""
-        rels = self._unique(paths)
-        if rels:
-            self._apply_read_only(self.file_states(rels))
-
     def prepare_write(self, paths: Sequence[Path | str]) -> tuple[str, ...]:
         """Before a DCC writes outputs: lock the tracked lockable ones not already mine.
 
-        New files need nothing. Returns the paths locked by this call, and
-        clears their read-only bit so the DCC can write.
+        New files need nothing. Returns the paths locked by this call.
 
         Raises:
             LockNotAcquired: Someone else holds a lock on a tracked lockable
@@ -359,7 +370,6 @@ class Session:
         self.lore.lock_acquire([self._abs(r) for r in targets])
         with self._lock:
             self._taken.update(path_key(r) for r in targets)
-        self._set_read_only(targets, False)
         self._touch(targets)
         return tuple(targets)
 
@@ -370,6 +380,11 @@ class Session:
         `lore status --check-dirty` no longer reports is byte-identical to its
         revision; its lock is released only when prepare_write took it in this
         session. Locks from `lock()` or held before stay.
+
+        Raises:
+            CommitBlocked: A new file is locked by someone else or its lock
+                state is unknown. Raised after `lore dirty` but before any
+                file is staged or any lock released; fix the lock and collect again.
         """
         existing = [r for r in self._unique(paths) if self._abs(r).exists()]
         if not existing:
@@ -386,17 +401,12 @@ class Session:
         released = [
             s for s in unchanged if s.lock is LockState.LOCKED_BY_ME and path_key(s.path) in taken
         ]
+        _refuse_blocked(s for s in states if not s.tracked)
         if new:
             self.lore.stage([self._abs(r) for r in new])
         if released:
             self.lore.lock_release([self._abs(s.path) for s in released])
             self._forget_taken(s.path for s in released)
-            for state in released:
-                wanted = wanted_read_only(
-                    LockState.NOT_LOCKED, tracked=True, lockable=state.lockable
-                )
-                if wanted is not None:
-                    self._set_read_only([state.path], wanted)
         with self._lock:
             self.touched.update(new, changed)
             self.outputs.update(new, changed)
@@ -474,9 +484,7 @@ class Session:
         """Run one scoped sync with each path as a root, skipping locally changed ones.
 
         Dry runs first: every path Lore names as locally changed is dropped
-        and the dry run repeats until it passes. The real sync runs with the
-        roots made writable, since Lore cannot write over a read-only file,
-        and the read-only rule is reapplied afterwards. A refusal that
+        and the dry run repeats until it passes. A refusal that
         names no known path raises. With nothing left to sync it returns
         without syncing.
 
@@ -496,12 +504,7 @@ class Session:
                 skipped.extend(hit)
                 roots = [r for r in roots if r not in hit]
                 continue
-            # Lore cannot write over a read-only file, and a dry run does not notice.
-            self._set_read_only(roots, False)
-            try:
-                self.lore.sync_roots(roots)
-            finally:
-                self.refresh_read_only(roots)
+            self.lore.sync_roots(roots)
             return SyncResult(tuple(roots), tuple(skipped))
         return SyncResult((), tuple(skipped))
 
@@ -521,7 +524,7 @@ class Session:
 
         After a successful push, own locks on the files of commits made without
         keep_locked are released, except files `lore status --check-dirty`
-        reports changed again, and the read-only rule is reapplied. A failed push
+        reports changed again. A failed push
         does not raise: the commit is safe locally and the result carries
         `pushed=False`, `push_error` and `diverged`. A failed commit raises.
 
@@ -533,7 +536,8 @@ class Session:
         outside `include` stays staged.
 
         Raises:
-            CommitBlocked: `include` holds a blocked file.
+            CommitBlocked: `include` holds a blocked file. Raised before
+                anything is staged.
             ValueError: `summary` is blank or `include` is empty.
             LoreCommandError: Staging, a dependency command or the commit failed.
         """
@@ -543,10 +547,7 @@ class Session:
         rels = self._unique(include)
         if not rels:
             raise ValueError("Nothing is included in the commit.")
-        blocked = [s.path for s in self.file_states(rels) if s.blocked]
-        if blocked:
-            raise CommitBlocked(blocked)
-        self.lore.stage([self._abs(r) for r in rels])
+        self._stage(rels)
         wanted = {path_key(r) for r in rels}
         wanted_dirs = {path_key(parent.as_posix()) for r in rels for parent in Path(r).parents}
         # Unstaging a folder is recursive, so only folders holding nothing included are unstaged.
@@ -630,9 +631,6 @@ class Session:
         )
 
     def _after_push(self, pending: list[_Pending]) -> None:
-        everything = list(dict.fromkeys(p for commit in pending for p in commit.paths))
-        if not everything:
-            return
         kept = {path_key(p) for commit in pending if commit.keep_locked for p in commit.paths}
         releasable = list(
             dict.fromkeys(
@@ -652,7 +650,6 @@ class Session:
             ]
             if mine:
                 self.lore.lock_release([self._abs(r) for r in mine])
-        self.refresh_read_only(everything)
 
     def _rel(self, path: Path | str) -> str:
         path = Path(path)
@@ -670,6 +667,10 @@ class Session:
         key = path_key(rel)
         with self._lock:
             return next((r for src, r in self.references.items() if path_key(src) == key), None)
+
+    def _stage(self, rels: list[str]) -> None:
+        _refuse_blocked(self.file_states(rels))
+        self.lore.stage([self._abs(r) for r in rels])
 
     def _link_remembered(self, rels: Iterable[str]) -> None:
         for rel in rels:
@@ -719,22 +720,6 @@ class Session:
             lock=classify(rel, locks, me, branch_id),
             owner=owner,
         )
-
-    def _apply_read_only(self, states: Iterable[FileState]) -> None:
-        for state in states:
-            wanted = wanted_read_only(state.lock, tracked=state.tracked, lockable=state.lockable)
-            if wanted is not None and state.exists:
-                self._set_read_only([state.path], wanted)
-
-    def _set_read_only(self, rels: Iterable[str], read_only: bool) -> None:
-        for rel in rels:
-            target = self._abs(rel)
-            if not target.is_file():
-                continue
-            try:
-                set_read_only(target, read_only)
-            except OSError as exc:
-                logger.warning("Could not change the read-only bit on %s: %s", target, exc)
 
 
 def _reported_keys(status: Status) -> set[str]:

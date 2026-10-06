@@ -71,7 +71,7 @@ def _error_box(error: BaseException, context: str) -> QtWidgets.QMessageBox:
         details = error.raw
     elif isinstance(error, CommitBlocked):
         message = str(error)
-        details = "\n".join(error.paths)
+        details = "\n".join(error.lines)
     else:
         message = str(error) or type(error).__name__
     text = f"{context}\n\n{message}" if context else message

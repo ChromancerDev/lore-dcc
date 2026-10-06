@@ -4,7 +4,7 @@ Set Pre-Render to `from lore_dcc.houdini import api; api.pre_render()` and
 Post-Render to `from lore_dcc.houdini import api; api.post_render()`.
 
 In Houdini's UI a failure shows a dialog. In hython and batch renders it is
-raised, so the render stops before it writes over a read-only file.
+raised, so the render stops before it writes over a file someone else locked.
 """
 
 from __future__ import annotations

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import os
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -11,7 +10,7 @@ from lore_dcc.errors import NotAWorkingCopy
 from lore_dcc.houdini import actions, hooks, host, references
 from lore_dcc.locks import LockState
 from lore_dcc.prefs import Prefs
-from lore_dcc.session import BehindReport, FileState, SyncResult, WriteResult
+from lore_dcc.session import BehindReport, CommitBlocked, FileState, SyncResult, WriteResult
 from lore_dcc.ui import TITLE_PREFIX
 
 
@@ -96,7 +95,7 @@ def env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
     monkeypatch.setattr(host, "error", lambda exc, context="": asked.append(("error", [])))
     monkeypatch.setattr(hooks, "_unknown_warned", False)
     monkeypatch.setattr(hooks, "_save_unlocked", set())
-    monkeypatch.setattr(hooks, "_read_only_warned", set())
+    monkeypatch.setattr(hooks, "_other_warned", set())
     return state
 
 
@@ -107,14 +106,12 @@ def test_lock_prompt_offers_two_choices_and_locks(env) -> None:
     assert env.session.names() == ["file_states", "lock"]
 
 
-def test_save_without_lock_makes_writable_and_is_remembered_per_file(env, tmp_path: Path) -> None:
+def test_save_without_lock_is_remembered_per_file(env, tmp_path: Path) -> None:
     target = tmp_path / "a.hip"
-    target.write_text("x")
     other = tmp_path / "b.hip"
-    other.write_text("x")
     env.answers.append("Save without lock")
     hooks.before_save(str(target))
-    assert env.session.names() == ["file_states", "make_writable"]
+    assert env.session.names() == ["file_states"]
     env.session.calls.clear()
     env.asked.clear()
     hooks.before_save(str(target))
@@ -125,20 +122,6 @@ def test_save_without_lock_makes_writable_and_is_remembered_per_file(env, tmp_pa
     assert [title for title, _ in env.asked] == ["Lore - Lock File?"]
 
 
-def test_remembered_save_without_lock_rewrites_a_read_only_bit_silently(env, tmp_path: Path) -> None:
-    target = tmp_path / "a.hip"
-    target.write_text("x")
-    env.answers.append("Save without lock")
-    hooks.before_save(str(target))
-    os.chmod(target, 0o444)
-    env.session.calls.clear()
-    env.asked.clear()
-    hooks.before_save(str(target))
-    assert env.asked == []
-    assert env.session.names() == ["file_states", "make_writable"]
-    os.chmod(target, 0o666)
-
-
 def test_closing_the_lock_prompt_changes_nothing_and_asks_again_next_time(env) -> None:
     hooks.before_save("a.hip")
     hooks.before_save("a.hip")
@@ -146,39 +129,11 @@ def test_closing_the_lock_prompt_changes_nothing_and_asks_again_next_time(env) -
     assert env.session.names() == ["file_states", "file_states"]
 
 
-def test_prompt_off_warns_once_per_file_when_read_only(env, tmp_path: Path, caplog) -> None:
+def test_prompt_off_asks_nothing(env) -> None:
     env.prefs = Prefs(prompt_lock_before_save=False)
-    target = tmp_path / "a.hip"
-    target.write_text("x")
-    os.chmod(target, 0o444)
-    other = tmp_path / "b.hip"
-    other.write_text("x")
-    os.chmod(other, 0o444)
-    with caplog.at_level("WARNING", logger="lore_dcc.houdini.hooks"):
-        hooks.before_save(str(target))
-        hooks.before_save(str(target))
-    assert len([r for r in caplog.records if "will fail" in r.getMessage()]) == 2
-    assert env.asked == [("Lore - File Not Locked", [])]
-    hooks.before_save(str(other))
-    assert env.asked == [("Lore - File Not Locked", []), ("Lore - File Not Locked", [])]
-    assert env.session.names() == ["file_states"] * 3
-    os.chmod(target, 0o666)
-    os.chmod(other, 0o666)
-
-
-def test_prompt_off_stays_quiet_for_writable_files_and_without_a_ui(env, tmp_path: Path) -> None:
-    env.prefs = Prefs(prompt_lock_before_save=False)
-    writable = tmp_path / "a.hip"
-    writable.write_text("x")
-    hooks.before_save(str(writable))
+    hooks.before_save("a.hip")
     assert env.asked == []
-    readonly = tmp_path / "b.hip"
-    readonly.write_text("x")
-    os.chmod(readonly, 0o444)
-    env.ui = False
-    hooks.before_save(str(readonly))
-    assert env.asked == []
-    os.chmod(readonly, 0o666)
+    assert env.session.names() == ["file_states"]
 
 
 def test_untracked_and_own_locks_never_prompt(env) -> None:
@@ -190,24 +145,14 @@ def test_untracked_and_own_locks_never_prompt(env) -> None:
     assert env.session.names() == ["file_states", "file_states"]
 
 
-def test_locked_by_other_names_the_owner_and_offers_writable(env, tmp_path: Path) -> None:
-    target = tmp_path / "a.hip"
-    target.write_text("x")
-    os.chmod(target, 0o444)
+def test_locked_by_other_warns_once_per_file_and_changes_nothing(env) -> None:
     env.session.state.update(lock=LockState.LOCKED_BY_OTHER, owner="Ana")
-    env.answers.append("Make writable")
-    hooks.before_save(str(target))
-    assert env.asked == [("Lore - File Locked by Another User", ["Make writable", "Leave read-only"])]
-    assert env.session.names() == ["file_states", "make_writable"]
-    os.chmod(target, 0o666)
-
-
-def test_locked_by_other_does_not_ask_again_once_writable(env, tmp_path: Path) -> None:
-    target = tmp_path / "a.hip"
-    target.write_text("x")
-    env.session.state.update(lock=LockState.LOCKED_BY_OTHER, owner="Ana")
-    hooks.before_save(str(target))
-    assert env.asked == []
+    hooks.before_save("a.hip")
+    hooks.before_save("a.hip")
+    assert env.asked == [("Lore - File Locked by Another User", [])]
+    assert env.session.names() == ["file_states", "file_states"]
+    hooks.before_save("b.hip")
+    assert len(env.asked) == 2
 
 
 def test_unknown_state_warns_once_and_changes_nothing(env) -> None:
@@ -310,10 +255,10 @@ def test_after_save_skips_staging_for_tracked_locked_or_declined(env) -> None:
     assert env.asked == []
 
 
-def test_after_load_drops_cached_identity_then_refreshes_the_read_only_bit(env) -> None:
+def test_after_load_drops_the_cached_identity(env) -> None:
     env.ui = False
     hooks.after_load("a.hip")
-    assert env.session.calls == [("invalidate", []), ("refresh_read_only", ["a.hip"])]
+    assert env.session.calls == [("invalidate", [])]
     assert env.asked == []
 
 
@@ -333,8 +278,8 @@ def test_after_load_records_references_and_checks_the_server_in_the_background(
     env, background
 ) -> None:
     hooks.after_load(env.hip)
-    assert env.session.names() == ["invalidate", "refresh_read_only", "set_references"]
-    assert env.session.calls[2] == ("set_references", [env.hip, env.scene.inside])
+    assert env.session.names() == ["invalidate", "set_references"]
+    assert env.session.calls[1] == ("set_references", [env.hip, env.scene.inside])
     ((fn, args, _),) = background.started
     fn(*args)
     assert env.session.calls[-1] == ("behind", [env.hip])
@@ -554,22 +499,29 @@ def test_lock_prompt_wording(env) -> None:
     assert env.texts == ["scene.hip is not locked in Lore. Lock it before saving?"]
 
 
-def test_locked_by_another_user_wording(env, tmp_path: Path) -> None:
-    target = tmp_path / "scene.hip"
-    target.write_text("x")
-    os.chmod(target, 0o444)
+def test_locked_by_another_user_wording(env) -> None:
     env.session.state.update(lock=LockState.LOCKED_BY_OTHER, owner="Ana")
-    hooks.before_save(str(target))
-    assert env.asked == [
-        ("Lore - File Locked by Another User", ["Make writable", "Leave read-only"])
-    ]
-    assert env.texts == [
+    hooks.before_save("D:/work/scene.hip")
+    assert env.asked == [("Lore - File Locked by Another User", [])]
+    assert env.messages == [
         (
-            "scene.hip is locked in Lore by Ana. Saving here makes a local copy you cannot "
-            "commit until they release the lock."
+            "scene.hip is locked in Lore by Ana. The save goes ahead, but the file cannot be "
+            "staged or committed until they release the lock."
         )
     ]
-    os.chmod(target, 0o666)
+
+
+def test_a_blocked_stage_shows_the_error(env) -> None:
+    blocked = FileState("a.hip", True, False, True, LockState.LOCKED_BY_OTHER, "Ana")
+
+    def refuse(paths):
+        raise CommitBlocked([blocked])
+
+    env.session.stage = refuse
+    env.session.state.update(tracked=False)
+    env.answers.append("Stage")
+    hooks.after_save("a.hip")
+    assert env.asked == [("Lore - Stage New File?", ["Stage", "Not now"]), ("error", [])]
 
 
 def sync(env, *, behind, result=None, edited=False, answers=()):
@@ -695,3 +647,10 @@ def test_commit_records_references_and_warns_before_the_dialog(env, monkeypatch)
     assert env.session.names() == ["set_references"]
     assert [t for t, _ in env.asked] == ["Lore - References Outside the Repo"]
     assert shown == [env.session]
+
+
+def test_after_save_does_not_offer_to_stage_a_file_it_cannot_stage(env) -> None:
+    env.session.state.update(tracked=False, lock=LockState.UNKNOWN)
+    hooks.after_save("a.hip")
+    assert "Lore - Stage New File?" not in [t for t, _ in env.asked]
+    assert "stage" not in env.session.names()

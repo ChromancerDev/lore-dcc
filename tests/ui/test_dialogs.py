@@ -297,7 +297,7 @@ def test_commit_error_shows_error_and_stays_open(qapp, monkeypatch) -> None:
     shown = []
     monkeypatch.setattr(dialogs, "show_error", lambda exc, ctx="": shown.append((exc, ctx)))
     session = FakeSession()
-    session.commit_error = CommitBlocked(["b.hip"])
+    session.commit_error = CommitBlocked([state("b.hip", LockState.LOCKED_BY_OTHER, "Bob")])
     dlg = build(session)
     dlg.summary_edit.setText("x")
     dlg.commit_button.click()

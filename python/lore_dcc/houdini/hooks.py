@@ -1,8 +1,8 @@
 """Save, load and asset-save hooks.
 
 A hook never raises into Houdini. Houdini ignores an exception raised in a
-Before callback and saves anyway, so the lock prompt offers choices instead of
-a veto: a file left read-only simply fails in Houdini's own save.
+Before callback and saves anyway, so these hooks warn or offer a lock instead
+of vetoing the save.
 """
 
 from __future__ import annotations
@@ -24,7 +24,7 @@ logger = logging.getLogger(__name__)
 _TAG = "lore_dcc_hook"
 _unknown_warned = False
 _save_unlocked: set[str] = set()
-_read_only_warned: set[str] = set()
+_other_warned: set[str] = set()
 
 
 def install() -> None:
@@ -79,7 +79,7 @@ setattr(_on_asset_event, _TAG, True)
 
 
 def before_save(file: str) -> None:
-    """Offer a lock or writable bit before a lockable file is saved."""
+    """Warn about, or offer a lock on, a lockable file before it is saved."""
     prefs = host.load_prefs()
     if not prefs.enabled:
         return
@@ -90,9 +90,14 @@ def before_save(file: str) -> None:
     if state.lock is LockState.UNKNOWN:
         _warn_unknown(file)
     elif state.lock is LockState.LOCKED_BY_OTHER:
-        _offer_writable(session, state, file)
-    elif state.lock is LockState.NOT_LOCKED and state.tracked:
-        _handle_unlocked(session, state, file, prefs.prompt_lock_before_save)
+        _warn_locked_by_other(state, file)
+    elif (
+        state.lock is LockState.NOT_LOCKED
+        and state.tracked
+        and prefs.prompt_lock_before_save
+        and _file_key(file) not in _save_unlocked
+    ):
+        _offer_lock(session, file)
 
 
 def after_save(file: str) -> None:
@@ -108,7 +113,13 @@ def after_save(file: str) -> None:
     if not prefs.prompt_stage_after_save:
         return
     state = _state(session, file)
-    if state is None or not state.exists or state.tracked or state.lock is LockState.LOCKED_BY_ME:
+    if (
+        state is None
+        or not state.exists
+        or state.tracked
+        or state.blocked
+        or state.lock is LockState.LOCKED_BY_ME
+    ):
         return
     if _is_staged(session, file):
         return
@@ -125,7 +136,7 @@ def after_save(file: str) -> None:
 
 
 def after_load(file: str) -> None:
-    """Apply the read-only rule to a freshly loaded file, then check its references.
+    """Drop the cached identity of a freshly loaded file, then check its references.
 
     The server check runs in the background and asks only when something is behind.
     """
@@ -135,7 +146,6 @@ def after_load(file: str) -> None:
     if session is None:
         return
     session.invalidate()
-    host.run(session.refresh_read_only, [file])
     if host.has_ui():
         from lore_dcc.ui import tasks
 
@@ -225,56 +235,28 @@ def _guarded(call: Any, *args: Any, context: str) -> None:
 
 def _warn_unknown(file: str) -> None:
     global _unknown_warned
-    logger.warning("Lock state of %s is unknown; leaving it as it is", file)
+    logger.warning("Lock state of %s is unknown; it cannot be staged or committed", file)
     if _unknown_warned or not host.has_ui():
         return
     _unknown_warned = True
     host.message(
         "Lore - Lock State Unknown",
-        "Lore could not tell who holds the lock on this file, so the plugin leaves it as it is "
-        "and blocks committing it. Run `lore login` or check the connection.",
+        "Lore could not tell who holds the lock on this file. The save goes ahead, but the "
+        "plugin will not stage or commit it until the lock state is known. "
+        "Run `lore login` or check the connection.",
     )
 
 
-def _offer_writable(session: Session, state: FileState, file: str) -> None:
-    name = Path(file).name
-    if os.access(file, os.W_OK):
-        logger.info("%s is locked by %s and already writable", name, state.owner)
-        return
-    choice = host.ask(
-        "Lore - File Locked by Another User",
-        f"{name} is locked in Lore by {state.owner}. "
-        "Saving here makes a local copy you cannot commit until they release the lock.",
-        ["Make writable", "Leave read-only"],
-        default="Leave read-only",
-    )
-    if choice == "Make writable":
-        _guarded(session.make_writable, [file], context=f"Making {name} writable")
-
-
-def _handle_unlocked(session: Session, state: FileState, file: str, prompt: bool) -> None:
+def _warn_locked_by_other(state: FileState, file: str) -> None:
     key = _file_key(file)
-    read_only = state.exists and not os.access(file, os.W_OK)
-    if key in _save_unlocked:
-        if read_only:
-            _guarded(session.make_writable, [file], context="Making the file writable")
-    elif prompt:
-        _offer_lock(session, file)
-    elif read_only:
-        _warn_read_only(file)
-
-
-def _warn_read_only(file: str) -> None:
-    name = Path(file).name
-    logger.warning("%s is tracked and not locked, so saving it will fail", file)
-    key = _file_key(file)
-    if key in _read_only_warned or not host.has_ui():
+    logger.warning("%s is locked by %s", file, state.owner)
+    if key in _other_warned or not host.has_ui():
         return
-    _read_only_warned.add(key)
+    _other_warned.add(key)
     host.message(
-        "Lore - File Not Locked",
-        f"{name} is tracked and not locked, so the save will fail. "
-        "Use Lock on the Lore shelf, then save again.",
+        "Lore - File Locked by Another User",
+        f"{Path(file).name} is locked in Lore by {state.owner}. The save goes ahead, but the "
+        "file cannot be staged or committed until they release the lock.",
     )
 
 
@@ -290,4 +272,3 @@ def _offer_lock(session: Session, file: str) -> None:
         _guarded(session.lock, [file], context=f"Locking {name}")
     elif choice == "Save without lock":
         _save_unlocked.add(_file_key(file))
-        _guarded(session.make_writable, [file], context=f"Making {name} writable")

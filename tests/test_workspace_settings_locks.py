@@ -1,10 +1,8 @@
-"""Tests for working copy discovery, per-repo settings and the read-only rule."""
+"""Tests for working copy discovery, per-repo settings and lock classification."""
 
 from __future__ import annotations
 
 import json
-import os
-import stat
 from pathlib import Path
 
 import pytest
@@ -100,32 +98,6 @@ LOCKS = (
 )
 def test_classify(path: str, found: tuple[LockRecord, ...] | None, expected: LockState) -> None:
     assert locks.classify(path, found, ME) is expected
-
-
-@pytest.mark.parametrize(
-    ("state", "tracked", "lockable", "expected"),
-    [
-        (LockState.NOT_LOCKED, True, True, True),
-        (LockState.LOCKED_BY_ME, True, True, False),
-        (LockState.LOCKED_BY_OTHER, True, True, True),
-        (LockState.LOCKED_BY_OTHER, False, True, True),
-        (LockState.NOT_LOCKED, False, True, False),
-        (LockState.UNKNOWN, True, True, None),
-        (LockState.NOT_LOCKED, True, False, None),
-    ],
-)
-def test_wanted_read_only(state: LockState, tracked: bool, lockable: bool, expected: bool | None) -> None:
-    assert locks.wanted_read_only(state, tracked=tracked, lockable=lockable) is expected
-
-
-def test_set_read_only_round_trip(tmp_path: Path) -> None:
-    path = tmp_path / "a.hip"
-    path.write_bytes(b"x")
-    assert locks.set_read_only(path, True)
-    assert not os.stat(path).st_mode & stat.S_IWRITE
-    assert not locks.set_read_only(path, True)
-    assert locks.set_read_only(path, False)
-    assert os.stat(path).st_mode & stat.S_IWRITE
 
 
 def test_houdini_block_is_stored_raw(tmp_path: Path) -> None:

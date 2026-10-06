@@ -1,18 +1,15 @@
-"""Lock states and the read-only rule that enforces them on disk.
+"""Lock states and records.
 
 Lore locks are advisory: the server records them but does not block a commit.
-The plugin enforces them with the read-only bit, the same rule on every DCC.
+The plugin refuses to stage or commit a file someone else holds.
 """
 
 from __future__ import annotations
 
-import os
-import stat
 import sys
 from collections.abc import Iterable
 from dataclasses import dataclass
 from enum import Enum
-from pathlib import Path
 
 CASE_INSENSITIVE = sys.platform == "win32"
 
@@ -114,32 +111,3 @@ def classify(
     if not lock.owner.strip() or lock.owner.strip() == "<unknown>":
         return LockState.UNKNOWN
     return LockState.LOCKED_BY_ME if me.owns(lock.owner) else LockState.LOCKED_BY_OTHER
-
-
-def wanted_read_only(state: LockState, *, tracked: bool, lockable: bool) -> bool | None:
-    """Return the read-only bit a file should have, or None to leave it alone.
-
-    Args:
-        state: The file's lock state.
-        tracked: True when the file exists in the current revision.
-        lockable: True when the file type is lockable.
-    """
-    if not lockable or state is LockState.UNKNOWN:
-        return None
-    if state is LockState.LOCKED_BY_OTHER:
-        return True
-    return tracked and state is not LockState.LOCKED_BY_ME
-
-
-def set_read_only(path: Path, read_only: bool) -> bool:
-    """Set or clear the owner-write bit on a file.
-
-    Returns:
-        True when the bit changed.
-    """
-    mode = os.stat(path).st_mode
-    new_mode = mode & ~stat.S_IWRITE if read_only else mode | stat.S_IWRITE
-    if new_mode == mode:
-        return False
-    os.chmod(path, new_mode)
-    return True

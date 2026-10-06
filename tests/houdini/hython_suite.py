@@ -128,17 +128,11 @@ class FakeSession:
     def mark_saved(self, paths):
         self._record("mark_saved", paths)
 
-    def refresh_read_only(self, paths):
-        self._record("refresh_read_only", paths)
-
     def lock(self, paths):
         self._record("lock", paths)
 
     def stage(self, paths):
         self._record("stage", paths)
-
-    def make_writable(self, paths):
-        self._record("make_writable", paths)
 
     def is_staged(self, path):
         self._record("is_staged", [path])
@@ -187,7 +181,7 @@ fake.forget()
 fake.state = {"exists": True, "tracked": True, "lock": LockState.NOT_LOCKED, "owner": None}
 hou.hipFile.save()
 check(capture.saw("Lore - Lock File?"), "tracked unlocked file: lock prompt logged")
-check("lock" not in fake.names() and "make_writable" not in fake.names(), "prompts change nothing without a UI")
+check("lock" not in fake.names(), "prompts change nothing without a UI")
 check("mark_saved" in fake.names(), "mark_saved runs on every save")
 
 fake.forget()
@@ -197,21 +191,15 @@ check(fake.names() == ["file_states", "mark_saved", "file_states"], "locked by m
 
 fake.forget()
 fake.state = {"exists": True, "tracked": True, "lock": LockState.LOCKED_BY_OTHER, "owner": "Ana"}
-os.chmod(hip, 0o444)
-try:
-    hou.hipFile.save()
-except hou.OperationFailed:
-    check(True, "read-only file fails in Houdini's own save")
-else:
-    check(False, "read-only file fails in Houdini's own save")
-os.chmod(hip, 0o666)
-check("make_writable" not in fake.names(), "locked by other: nothing changed without a UI")
+hou.hipFile.save()
+check(capture.saw("locked by Ana"), "locked by other: logged, and the save goes ahead")
+check("lock" not in fake.names(), "locked by other: nothing changed without a UI")
 
 fake.forget()
 fake.state = {"exists": True, "tracked": True, "lock": LockState.UNKNOWN, "owner": None}
 hou.hipFile.save()
 check(capture.saw("unknown"), "unknown lock state is logged")
-check("lock" not in fake.names() and "make_writable" not in fake.names(), "unknown state changes nothing")
+check("lock" not in fake.names(), "unknown state changes nothing")
 
 fake.forget()
 fake.fail_states = True
@@ -221,8 +209,7 @@ fake.fail_states = False
 
 fake.forget()
 hou.hipFile.load(str(hip), suppress_save_prompt=True)
-check(fake.paths("refresh_read_only") == [norm(hip)], "AfterLoad refreshes the read-only bit")
-check(fake.names() == ["invalidate", "refresh_read_only"], "AfterLoad drops caches, then refreshes")
+check(fake.names() == ["invalidate"], "AfterLoad drops the caches")
 
 fake.forget()
 stray = outside / "stray.hip"

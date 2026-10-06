@@ -14,7 +14,8 @@ from lore_dcc.errors import (
     LoreOutputError,
     NotAWorkingCopy,
 )
-from lore_dcc.session import CommitBlocked
+from lore_dcc.locks import LockState
+from lore_dcc.session import CommitBlocked, FileState
 from lore_dcc.ui import messages
 from PySide6 import QtWidgets
 
@@ -50,8 +51,12 @@ def test_lore_not_found_tells_user_to_install(qapp) -> None:
 
 
 def test_commit_blocked_lists_paths(qapp) -> None:
-    box = messages._error_box(CommitBlocked(["a.hip", "b.hip"]), "")
-    assert box.detailedText() == "a.hip\nb.hip"
+    states = [
+        FileState("a.hip", True, True, True, LockState.LOCKED_BY_OTHER, "Bob"),
+        FileState("b.hip", True, True, True, LockState.UNKNOWN, None),
+    ]
+    box = messages._error_box(CommitBlocked(states), "")
+    assert box.detailedText() == "a.hip (locked by Bob)\nb.hip (lock state unknown)"
 
 
 def test_plain_error_falls_back_to_message(qapp) -> None:
