@@ -310,6 +310,17 @@ check(api.pre_render(geo) == (), "pre_render on a non-output node does nothing")
 fake.forget()
 check(api.pre_render(elsewhere) == () and fake.calls == [], "outputs outside the working copy are ignored")
 
+fake.forget()
+exported = [work / "export" / "a.fbx", "$HIP/tex/b.exr", str(outside / "c.fbx")]
+check(len(api.lock(exported)) == 2, "lock returns what the session locked")
+wanted = [norm(work / "export" / "a.fbx"), norm(work / "tex" / "b.exr")]
+check(fake.paths("prepare_write") == wanted, "lock expands $HIP and drops paths outside the working copy")
+check(isinstance(api.stage(work / "export" / "a.fbx"), WriteResult), "stage takes one path")
+check(fake.paths("finish_write") == wanted[:1], "stage reports the written file")
+fake.forget()
+check(api.stage([str(outside / "c.fbx")]) is None and fake.calls == [], "stage outside a working copy does nothing")
+check(api.lock([]) == () and fake.calls == [], "lock with no paths does nothing")
+
 
 def failing_prepare(paths):
     raise RuntimeError("lock failed")

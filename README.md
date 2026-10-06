@@ -59,6 +59,15 @@ import lore_dcc.houdini.api as lore; lore.post_render()
 
 Pre-render locks the tracked files it is about to write. Post-render stages new files and releases the locks on files that came out byte-identical.
 
+A script that writes files itself, such as an HDA export button or a Python SOP, does the same with two calls. Paths can be absolute or use variables such as `$HIP`, and paths outside the working copy are ignored.
+
+```python
+import lore_dcc.houdini.api as lore
+lore.lock(["$HIP/export/hero.fbx", "$HIP/tex/hero_albedo.exr"])
+# ... write the files ...
+lore.stage(["$HIP/export/hero.fbx", "$HIP/tex/hero_albedo.exr"])
+```
+
 ## Per-project settings
 
 An optional `lore-dcc.json` at the root of a Lore working copy changes which file types the plugin locks and which node parameters count as outputs. Commit it like any project file.
