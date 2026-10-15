@@ -26,3 +26,10 @@ def test_every_prefilled_field_exists_in_the_form() -> None:
     query = parse_qs(urlsplit(bugs.report_url("Blender", "5.0")).query)
     for field in set(query) - {"template"}:
         assert f"id: {field}\n" in form
+
+
+def test_the_dcc_field_keeps_the_heading_the_label_workflow_reads() -> None:
+    form = FORM.read_text(encoding="utf-8")
+    workflow = (FORM.parents[1] / "workflows" / "label-dcc.yml").read_text(encoding="utf-8")
+    assert "id: dcc\n    attributes:\n      label: DCC\n" in form
+    assert "/^### DCC$/" in workflow
