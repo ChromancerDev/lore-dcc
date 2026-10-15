@@ -14,7 +14,7 @@ TITLED = {"ask", "message", "show_message", "setWindowTitle", "Ask", "Message"}
 # Blender calls that open a popup and take its title as `title=`.
 BLENDER_POPUPS = {"invoke_props_dialog", "invoke_confirm", "popup_menu"}
 # Modules that only forward a caller's title to the UI, where ui.window_title adds the prefix.
-FORWARDERS = {"host.py", "messages.py", "tasks.py", "dialogs.py"}
+FORWARDERS = {"houdini/host.py", "ui/messages.py", "ui/tasks.py", "blender/dialogs.py"}
 
 
 def _calls(path: Path):
@@ -25,11 +25,15 @@ def _calls(path: Path):
             yield name, node
 
 
+def _rel(path: Path) -> str:
+    return path.relative_to(SOURCE).as_posix()
+
+
 def _check(path: Path, node: ast.Call, title: ast.expr) -> None:
     if isinstance(title, ast.Constant) and isinstance(title.value, str):
         assert title.value.startswith(TITLE_PREFIX), f"{path.name}:{node.lineno} {title.value!r}"
     else:
-        assert path.name in FORWARDERS, f"{path.name}:{node.lineno} title is not a literal"
+        assert _rel(path) in FORWARDERS, f"{_rel(path)}:{node.lineno} title is not a literal"
 
 
 @pytest.mark.parametrize("path", sorted(SOURCE.rglob("*.py")), ids=lambda p: p.name)
@@ -46,8 +50,8 @@ def test_no_popup_bypasses_the_message_helpers() -> None:
     for path in SOURCE.rglob("*.py"):
         text = path.read_text(encoding="utf-8")
         assert "hou.ui.display" not in text, path.name
-        if path.name != "messages.py":
+        if _rel(path) != "ui/messages.py":
             assert "QMessageBox(" not in text, path.name
-        if path.name not in ("dialogs.py", "commit_ui.py"):
+        if _rel(path) not in ("blender/dialogs.py", "blender/commit_ui.py"):
             assert "invoke_props_dialog" not in text, path.name
             assert "popup_menu" not in text, path.name

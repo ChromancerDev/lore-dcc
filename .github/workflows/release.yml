@@ -40,7 +40,8 @@ jobs:
         # The manifest sits at the zip root and the core under python/, where blender/__init__.py looks first.
         run: |
           mkdir -p build/python
-          cp blender/blender_manifest.toml blender/__init__.py LICENSE build/
+          cp blender/blender_manifest.toml blender/__init__.py LICENSE README.md build/
+          cp -r docs build/
           cp -r python/lore_dcc build/python/
           (cd build && zip -r "../lore-dcc-blender-$VERSION.zip" . -x '*__pycache__*' '*.pyc')
       - uses: actions/upload-artifact@v4
