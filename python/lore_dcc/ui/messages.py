@@ -7,11 +7,13 @@ from collections.abc import Sequence
 from PySide6 import QtWidgets
 
 from lore_dcc.errors import (
+    SERVER_UNREACHABLE_TITLE,
     LockNotAcquired,
     LoreCommandError,
     LoreNotFound,
     LoreOutputError,
     NotAWorkingCopy,
+    ServerUnreachable,
 )
 from lore_dcc.session import CommitBlocked
 from lore_dcc.ui import parent_window, window_title
@@ -58,7 +60,12 @@ def ask(title: str, text: str, buttons: Sequence[str], default: str | None = Non
 
 def _error_box(error: BaseException, context: str) -> QtWidgets.QMessageBox:
     details = ""
-    if isinstance(error, NotAWorkingCopy):
+    title = _ERROR_TITLE
+    if isinstance(error, ServerUnreachable):
+        title = SERVER_UNREACHABLE_TITLE
+        message = str(error)
+        details = error.output
+    elif isinstance(error, NotAWorkingCopy):
         message = "Not a Lore working copy"
         details = str(error)
     elif isinstance(error, LoreNotFound):
@@ -75,7 +82,7 @@ def _error_box(error: BaseException, context: str) -> QtWidgets.QMessageBox:
     else:
         message = str(error) or type(error).__name__
     text = f"{context}\n\n{message}" if context else message
-    return _box(QtWidgets.QMessageBox.Icon.Critical, _ERROR_TITLE, text, details)
+    return _box(QtWidgets.QMessageBox.Icon.Critical, title, text, details)
 
 
 def show_error(error: BaseException, context: str = "") -> None:

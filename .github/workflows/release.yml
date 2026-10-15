@@ -24,7 +24,50 @@ jobs:
           cp -r release/houdini/packages "$stage/"
           cp -r python houdini docs LICENSE README.md "$stage/lore-dcc/"
           (cd "$stage" && zip -r "$GITHUB_WORKSPACE/lore-dcc-houdini-$VERSION.zip" packages lore-dcc -x '*__pycache__*' '*.pyc')
+      - uses: actions/upload-artifact@v4
+        with:
+          name: houdini
+          path: lore-dcc-houdini-*.zip
+
+  blender:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Check the tag matches the package and manifest versions
+        run: |
+          version=$(sed -n 's/^__version__ = "\(.*\)"/\1/p' python/lore_dcc/__init__.py)
+          manifest=$(sed -n 's/^version = "\(.*\)"/\1/p' blender/blender_manifest.toml)
+          test "v$version" = "$GITHUB_REF_NAME" || { echo "tag $GITHUB_REF_NAME != v$version"; exit 1; }
+          test "$manifest" = "$version" || { echo "manifest $manifest != $version"; exit 1; }
+          echo "VERSION=$version" >> "$GITHUB_ENV"
+      - name: Build the Blender extension zip
+        # The core goes in as the wheel blender_manifest.toml lists; Blender installs it with the extension.
+        run: |
+          stage=build/blender
+          mkdir -p "$stage"
+          python -m pip wheel --no-deps -w "$stage/wheels" .
+          test -f "$stage/wheels/lore_dcc-$VERSION-py3-none-any.whl"
+          cp blender/blender_manifest.toml blender/__init__.py LICENSE README.md "$stage/"
+          cp -r docs "$stage/"
+          (cd "$stage" && zip -r "$GITHUB_WORKSPACE/lore-dcc-blender-$VERSION.zip" . -x '*__pycache__*' '*.pyc')
+      - uses: actions/upload-artifact@v4
+        with:
+          name: blender
+          path: lore-dcc-blender-*.zip
+
+  publish:
+    needs: [houdini, blender]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
       - name: Publish the release
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "$GITHUB_REF_NAME" "lore-dcc-houdini-$VERSION.zip" --title "$GITHUB_REF_NAME" --generate-notes --verify-tag
+        run: gh release create "$GITHUB_REF_NAME" dist/*.zip --title "$GITHUB_REF_NAME" --generate-notes --verify-tag

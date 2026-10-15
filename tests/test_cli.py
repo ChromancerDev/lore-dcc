@@ -13,6 +13,7 @@ from lore_dcc.errors import (
     LoreCommandError,
     LoreOutputError,
     LoreVersionError,
+    ServerUnreachable,
 )
 
 SIG = "9" * 64
@@ -251,3 +252,44 @@ def test_sync_roots_refuses_empty_and_oversized(tmp_path: Path) -> None:
         lore.sync_roots([])
     with pytest.raises(ValueError):
         lore.sync_roots(["x" * 100] * 1000)
+
+
+def test_dependency_calls_use_the_link_tag(tmp_path: Path) -> None:
+    runner = FakeRunner((0, f"{tmp_path}/s.blend:\n  tex/a.png [blender]\n"))
+    lore = make(tmp_path, runner)
+    lore.link_tag = "blender"
+    assert lore.dependency_list(Path("s.blend")) == ("tex/a.png",)
+    lore.dependency_add(Path("s.blend"), [Path("tex/a.png")])
+    lore.dependency_remove(Path("s.blend"), [Path("tex/b.png")])
+    assert [call[5:7] for call in runner.calls] == [
+        ["list", "--tag=blender"],
+        ["add", "--tag=blender"],
+        ["remove", "--tag=blender"],
+    ]
+
+
+def test_child_env_drops_host_ca_variables_inside_the_host_python(tmp_path) -> None:
+    prefix = tmp_path / "blender" / "python"
+    bundled = str(prefix / "lib" / "site-packages" / "certifi" / "cacert.pem")
+    env = cli.child_env({"SSL_CERT_FILE": bundled, "PATH": "x"}, prefix=str(prefix))
+    assert env == {"PATH": "x"}
+
+
+def test_child_env_keeps_ca_variables_set_outside_the_host_python(tmp_path) -> None:
+    studio = str(tmp_path / "studio" / "ca.pem")
+    environ = {"SSL_CERT_FILE": studio, "PATH": "x"}
+    assert cli.child_env(environ, prefix=str(tmp_path / "blender" / "python")) is None
+    assert cli.child_env({"PATH": "x"}, prefix=str(tmp_path / "blender" / "python")) is None
+
+
+def test_disconnected_exit_raises_server_unreachable(tmp_path) -> None:
+    output = "[Error] Disconnected from server\n  at lore/src/auth.rs:627 - resolving auth endpoint\n"
+
+    def runner(argv, **kwargs):
+        return subprocess.CompletedProcess(argv, 6, "", output)
+
+    lore = cli.LoreCli(tmp_path, executable="lore", runner=runner)
+    with pytest.raises(ServerUnreachable) as info:
+        lore.run("lock", "query")
+    assert info.value.output == output
+    assert isinstance(info.value, LoreCommandError)

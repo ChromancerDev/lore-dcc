@@ -1,12 +1,15 @@
-name: Bug report
-description: Something in the Lore plugin did not work as expected.
-labels: ["bug"]
+name: Bug Report
+description: File a bug report.
+title: "[Bug]: "
+labels: ["bug", "triage"]
+type: bug
 body:
   - type: markdown
     attributes:
       value: |
-        File a Bug in the Lore menu fills in the DCC, versions and OS for you.
-        Leave out server addresses, user names and anything private.
+        Thanks for taking the time to fill out this bug report!
+        `Lore > File a Bug` in Houdini or Blender fills in the DCC, versions, OS and the last Lore error for you, with server addresses, emails and IDs masked. Check it before you submit.
+        This repository is public: leave out server addresses, user names and anything private.
   - type: input
     id: dcc
     attributes:
@@ -26,6 +29,7 @@ body:
     id: plugin-version
     attributes:
       label: Plugin version
+      description: What version of the Lore plugin are you running?
       placeholder: "0.1.0"
     validations:
       required: true
@@ -33,7 +37,7 @@ body:
     id: lore-version
     attributes:
       label: Lore version
-      description: The output of `lore --version`.
+      description: The output of `lore --version` in a terminal.
       placeholder: "0.9.0+783"
     validations:
       required: true
@@ -45,21 +49,37 @@ body:
   - type: textarea
     id: what-happened
     attributes:
-      label: What happened
-      description: What you did, what you expected, and what you got instead.
+      label: What were you doing, and what happened?
+      description: The steps you took, what you expected, and what you got instead.
+      placeholder: |
+        I opened a scene inside a Lore working copy and chose Lore > Lock.
+        I expected the file to be locked, but ...
     validations:
       required: true
-  - type: textarea
-    id: steps
+  - type: dropdown
+    id: area
     attributes:
-      label: Steps to reproduce
-      placeholder: |
-        1. Open a hip inside a Lore working copy
-        2. Lore > Lock
-        3. ...
+      label: Where in the plugin did it happen?
+      multiple: true
+      options:
+        - Install or startup
+        - Info
+        - Lock or Discard changes
+        - Prompts when saving or opening a file
+        - Commit or push
+        - Sync Dependencies
+        - Collect Outputs or render outputs
+        - Something else
   - type: textarea
     id: output
     attributes:
-      label: Error text or log
-      description: The text of any Lore dialog, and Houdini's console or Blender's system console output.
+      label: Relevant log output
+      description: Please copy and paste the text of any Lore dialog and any relevant output from Houdini's console or Blender's system console. This will be automatically formatted into code, so no need for backticks.
       render: text
+  - type: upload
+    id: screenshots
+    attributes:
+      label: Upload screenshots
+      description: If applicable, add screenshots to help explain your problem.
+    validations:
+      required: false

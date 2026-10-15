@@ -18,6 +18,8 @@ _REPOSITORY = re.compile(r"^Repository (?P<id>[0-9a-f]+)$")
 _ON_BRANCH = re.compile(r"^On branch (?P<branch>\S+) revision (?P<rev>\d+) -> (?P<sig>[0-9a-f]+)$")
 _REMOTE_REVISION = re.compile(r"^Remote revision (?P<rev>\d+) -> (?P<sig>[0-9a-f]+)$")
 _CHANGE = re.compile(r"^(?P<code>[MAD]) (?P<path>.+)$")
+# `status --check-dirty` and `--scan` end with counts; only "added" and "deleted" have been captured.
+_TRACKED_COUNT = re.compile(r"^Tracked changes: \d+ (added|deleted)(, \d+ (added|deleted))*$")
 _LOCK = re.compile(r"^(?P<path>.+) by (?P<owner>.+?) on branch (?P<branch>\S+)$")
 _BRANCH = re.compile(r"^Branch (?P<name>\S.*)$")
 _COMMITTED_REVISION = re.compile(r"^Revision\s*:\s*(?P<rev>\d+)$")
@@ -25,6 +27,8 @@ _PUSHED_REVISION = re.compile(
     r"^Pushed revision (?P<rev>\d+) -> (?P<sig>[0-9a-f]+) to branch (?P<branch>\S+)$"
 )
 _DEPENDENCY = re.compile(r"^  (?P<path>\S.*?) \[(?P<tags>[^\]]*)\]$")
+_CONNECTION_FAILED = re.compile(r"^\[Warn\] Connection to (?P<url>\S+) failed$")
+_REMOTE_UNREADABLE = re.compile(r"^Remote reachable but could not read remote revision \(.*\)$")
 _SYNC_BLOCKED = re.compile(r"^\[Error\] File has local changes: (?P<path>.+?) \(incoming size .*\)$")
 BRANCH_INFO_KEYS = ("ID", "Latest", "Remote Latest", "Creator", "Created")
 
@@ -36,6 +40,7 @@ class RemoteState(Enum):
     BEHIND = "behind"
     DIVERGED = "diverged"
     UNKNOWN = "unknown"
+    UNREACHABLE = "unreachable"
 
 
 _REMOTE_NOTES = {
@@ -103,10 +108,14 @@ class Status:
     untracked: tuple[Change, ...]
     signature: str | None = None
     remote_signature: str | None = None
+    unreachable: bool = False
 
     @property
     def remote_state(self) -> RemoteState:
-        """The remote state, UNKNOWN when the line is missing or unfamiliar."""
+        """The remote state: UNREACHABLE when Lore could not reach the server,
+        UNKNOWN when the line is missing or unfamiliar."""
+        if self.unreachable:
+            return RemoteState.UNREACHABLE
         return _REMOTE_NOTES.get(self.remote_note or "", RemoteState.UNKNOWN)
 
 
@@ -248,11 +257,15 @@ def parse_status(text: str) -> Status:
     remote_note: str | None = None
     signature: str | None = None
     remote_signature: str | None = None
+    unreachable = False
     section: str | None = None
     sections: dict[str, list[Change]] = {"staged": [], "unstaged": [], "untracked": []}
     for line in text.splitlines():
         stripped = line.strip()
         if not stripped or _REPOSITORY.match(stripped):
+            continue
+        if _CONNECTION_FAILED.match(stripped) or _REMOTE_UNREADABLE.match(stripped):
+            unreachable = True
             continue
         if match := _ON_BRANCH.match(stripped):
             branch, revision, signature = match["branch"], int(match["rev"]), match["sig"]
@@ -267,6 +280,8 @@ def parse_status(text: str) -> Status:
             section = _SECTIONS[stripped]
             continue
         if stripped == "Tracked changes:" and section is not None:
+            continue
+        if _TRACKED_COUNT.match(stripped):
             continue
         if stripped == NO_CHANGES_LINE:
             continue
@@ -289,6 +304,7 @@ def parse_status(text: str) -> Status:
         untracked=tuple(sections["untracked"]),
         signature=signature,
         remote_signature=remote_signature,
+        unreachable=unreachable,
     )
 
 

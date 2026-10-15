@@ -1,53 +1,20 @@
 """Find the files a scene reads, and reload them after a sync.
 
-`split_references` is pure Python; the rest reads the scene through `hou`.
+Reads the scene through `hou`; the sorting is `lore_dcc.references`.
 """
 
 from __future__ import annotations
 
 import os
-from collections.abc import Iterable, Sequence
-from dataclasses import dataclass
+from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
 import hou
 
+from lore_dcc.references import SceneReferences, split_references
 
-@dataclass(frozen=True)
-class SceneReferences:
-    """The files a scene reads.
-
-    Attributes:
-        inside: Absolute paths inside the working copy, in scene order, no
-            duplicates. Missing files are kept; folders are not.
-        outside: `(where, file)` pairs for existing files outside the
-            working copy. `where` is the parm path, or the node type for an
-            HDA library.
-    """
-
-    inside: tuple[Path, ...]
-    outside: tuple[tuple[str, str], ...]
-
-
-def split_references(pairs: Iterable[tuple[str, str]], root: Path) -> SceneReferences:
-    """Sort `(where, expanded value)` pairs into inside and outside the working copy.
-
-    Values that are blank, not absolute, or an existing folder are dropped.
-    An outside value is kept only when it is an existing file.
-    """
-    root = root.resolve()
-    inside: dict[Path, None] = {}
-    outside: list[tuple[str, str]] = []
-    for where, value in pairs:
-        if not value.strip() or not os.path.isabs(value) or os.path.isdir(value):
-            continue
-        resolved = Path(value).resolve()
-        if resolved.is_relative_to(root):
-            inside[resolved] = None
-        elif os.path.isfile(value):
-            outside.append((where, value))
-    return SceneReferences(tuple(inside), tuple(outside))
+__all__ = ["SceneReferences", "library_file", "reload", "scan", "split_references"]
 
 
 def library_file(definition: Any) -> str | None:

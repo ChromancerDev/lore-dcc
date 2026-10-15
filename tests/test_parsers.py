@@ -439,3 +439,56 @@ def test_status_keeps_both_signatures() -> None:
         f"On branch main revision 8 -> {'a' * 64}\nRemote revision 9 -> {'b' * 64}\n"
     )
     assert (status.signature, status.remote_signature) == ("a" * 64, "b" * 64)
+
+
+def test_status_check_dirty_on_new_files_ends_with_a_count() -> None:
+    text = f"""\
+Repository 01a01c890d5c78629798bab981f4d893
+On branch main revision 20 -> {SIG}
+Remote revision 20 -> {SIG}
+Local branch in sync with remote
+Untracked files:
+A ldblender/render/shot_0001.png
+A ldblender/render/shot_0002.png
+Tracked changes: 2 added
+"""
+    status = parsers.parse_status(text)
+    assert [c.path for c in status.untracked] == [
+        "ldblender/render/shot_0001.png",
+        "ldblender/render/shot_0002.png",
+    ]
+
+
+def test_status_count_line_with_an_unseen_word_fails_closed() -> None:
+    text = f"On branch main revision 2 -> {SIG}\nTracked changes: 1 renamed\n"
+    with pytest.raises(LoreOutputError):
+        parsers.parse_status(text)
+
+
+@pytest.mark.parametrize(
+    "line", ["Tracked changes: 8 deleted", "Tracked changes: 6 added, 9 deleted"]
+)
+def test_status_scan_count_lines(line: str) -> None:
+    text = f"On branch main revision 20 -> {SIG}\nChanges not staged for commit:\nD README.md\n{line}\n"
+    assert parsers.parse_status(text).unstaged == (parsers.Change("D", "README.md", False),)
+
+
+STATUS_SERVER_REFUSED = """[Warn] Connection to lore://100.78.241.36:41337 failed
+Repository 01a0bd67f85871c1b216349e457ddc1e
+On branch main revision 8 -> b5c30951c50135402d9fb46e6d836cabcc648ea029a592d081abea36757191aa
+Remote reachable but could not read remote revision (not authorized or unavailable)
+Untracked files:
+A source/tools/test.blend
+"""
+
+
+def test_status_when_the_server_refuses_is_unreachable_not_an_error() -> None:
+    status = parsers.parse_status(STATUS_SERVER_REFUSED)
+    assert status.unreachable
+    assert status.remote_state is parsers.RemoteState.UNREACHABLE
+    assert status.remote_revision is None
+    assert [c.path for c in status.untracked] == ["source/tools/test.blend"]
+
+
+def test_status_in_sync_is_reachable() -> None:
+    assert not parsers.parse_status(STATUS_UNTRACKED).unreachable
