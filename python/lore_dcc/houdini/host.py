@@ -97,6 +97,9 @@ def message(title: str, text: str) -> None:
 
 def error(exc: BaseException, context: str = "") -> None:
     """Show an error, or log it without a UI."""
+    from lore_dcc import bugs
+
+    bugs.remember_error(exc, context)
     if not has_ui():
         logger.error("%s: %s", context or "Lore", exc)
         return

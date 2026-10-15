@@ -24,6 +24,7 @@ from typing import Any
 
 import bpy
 
+from lore_dcc import bugs
 from lore_dcc import prefs as prefs_module
 from lore_dcc import session as session_module
 from lore_dcc.blender import flow
@@ -124,6 +125,8 @@ class BlenderRunner:
 
     def prompt(self, request: Ask | Message | Error, answer: Callable[[str | None], None]) -> None:
         """Queue a popup. Safe from any thread; it opens on the next tick."""
+        if isinstance(request, Error):
+            bugs.remember_error(request.error, request.context)
         self._prompts.append(Prompt(request, answer, next(self._tokens)))
 
     def answer(self, token: int, label: str | None) -> None:

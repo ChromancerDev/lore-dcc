@@ -106,4 +106,4 @@ Commit an optional `lore-dcc.json` at the root of the working copy to change whi
 
 ## Bug reports from your tools
 
-`lore_dcc.bugs.report_url(dcc, dcc_version)` returns the prefilled GitHub bug form link, if your own help menu wants to point at it.
+`lore_dcc.bugs.report_url(dcc, dcc_version)` returns the prefilled GitHub bug form link, if your own help menu wants to point at it. It includes the last error the plugin showed this session, with server addresses, emails, IDs and home folder names masked by `lore_dcc.bugs.redact`.
