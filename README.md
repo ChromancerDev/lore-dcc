@@ -6,6 +6,12 @@ Lore version control inside DCC applications, in the spirit of SideFX Labs `P4Ho
 
 Found a bug? Use `Lore > File a Bug` in Houdini or Blender, or [open an issue](https://github.com/ChromancerDev/lore-dcc/issues/new?template=bug_report.yml).
 
+## Disclaimer
+
+Lore is a pre-1.0 version control system developed and maintained by Epic Games. This plugin is also pre-1.0. Both can change in ways that break existing workflows, and either can have bugs that lose work.
+
+Use this software at your own risk. The authors are not responsible for lost files, errors or any other issues that come from using it. Keep backups of anything you cannot afford to lose. The [MIT License](LICENSE) provides this software "as is", without warranty of any kind.
+
 ## Requirements
 
 - Houdini 22, or Blender 5.2
