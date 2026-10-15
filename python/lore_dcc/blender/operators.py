@@ -309,5 +309,6 @@ CLASSES = (
 MENU_HOOKS = (
     ("TOPBAR_MT_editor_menus", draw_topbar),
     ("UI_MT_button_context_menu", draw_button_menu),
+    ("OUTLINER_MT_id_data", draw_outliner_menu),
     ("OUTLINER_MT_context_menu", draw_outliner_menu),
 )

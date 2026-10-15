@@ -55,6 +55,7 @@ def _make_bpy() -> types.ModuleType:
         TOPBAR_MT_editor_menus=_MenuType(),
         UI_MT_button_context_menu=_MenuType(),
         OUTLINER_MT_context_menu=_MenuType(),
+        OUTLINER_MT_id_data=_MenuType(),
     )
     bpy.props = types.SimpleNamespace(
         **{

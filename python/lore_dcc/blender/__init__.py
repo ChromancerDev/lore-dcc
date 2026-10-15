@@ -1,1 +1,1 @@
-"""Blender integration. Needs bpy."""
+"""Blender integration for lore-dcc."""
