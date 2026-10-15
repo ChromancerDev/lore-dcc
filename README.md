@@ -88,10 +88,6 @@ An optional `lore-dcc.json` at the root of a Lore working copy changes which fil
 - `lockable` adds or removes file suffixes. The defaults are in [`python/lore_dcc/settings.py`](python/lore_dcc/settings.py).
 - `houdini.outputs` keys are node type names with an optional `Category/` prefix. Leave out the version: `filecache`, not `filecache::2.0`. An entry replaces the default for that type. `when` limits the entry to nodes whose parameter matches: a number matches the value, a string matches the menu token. The default table is in [`python/lore_dcc/houdini/outputs.py`](python/lore_dcc/houdini/outputs.py).
 
-## Design
-
-[`docs/design/v1-houdini.md`](docs/design/v1-houdini.md) holds the v1 feature map, the lock rules and the open checks.
-
 ## Development
 
 ```
