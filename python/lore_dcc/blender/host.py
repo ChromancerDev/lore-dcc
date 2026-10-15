@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import Any
 
 import bpy
+
 from lore_dcc import prefs as prefs_module
 from lore_dcc import session as session_module
 from lore_dcc.blender import flow

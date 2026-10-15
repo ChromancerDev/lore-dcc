@@ -1,9 +1,10 @@
 """The one popup every question, message and error goes through.
 
 `LORE_OT_dialog` shows the runner's current prompt in a dialog titled with
-its `Lore - ` title. A question's main answer is the dialog's confirm button;
-other answers are buttons in the body. Cancel, or closing the popup,
-answers None, the same as Houdini's close button.
+its `Lore - ` title. A question with one answer puts it on the confirm
+button. A question with several answers shows them as a row of choices,
+the default picked, and OK confirms the pick. Cancel, Escape or a click
+outside the popup answers None, the same as closing a Houdini dialog.
 """
 
 from __future__ import annotations
@@ -11,12 +12,16 @@ from __future__ import annotations
 import textwrap
 
 import bpy
+
 from lore_dcc.blender import flow, host
 from lore_dcc.blender.flow import Ask, Error, Message
 from lore_dcc.ui import window_title
 
 DISMISS = frozenset({"Cancel", "Not now", "Close"})
 _WIDTH_CHARS = 90
+
+# Blender drops enum item strings that Python stops referencing, so the items live here.
+_choice_items: list[tuple[str, str, str]] = []
 
 
 def text_lines(text: str, width: int = _WIDTH_CHARS) -> list[str]:
@@ -32,20 +37,28 @@ def text_lines(text: str, width: int = _WIDTH_CHARS) -> list[str]:
 
 
 def layout_of(request: Ask | Message | Error) -> tuple[str, str, list[str], bool]:
-    """Return the title, confirm label, body buttons and whether Enter cancels.
+    """Return the title, confirm label, choices and whether Enter cancels.
 
-    The confirm button is the default answer unless that is a dismiss word
-    such as Cancel, in which case it is the first other answer and Enter cancels.
+    Dismiss words such as Cancel are the dialog's own Cancel button. One
+    remaining answer goes on the confirm button. Several remaining answers
+    become choices, default first picked, confirmed with OK. Enter cancels
+    when the default is a dismiss word.
     """
     if isinstance(request, Error):
         return "Lore - Error", "OK", [], False
     if isinstance(request, Message):
         return window_title(request.title), "OK", [], False
     answers = [b for b in request.buttons if b not in DISMISS]
-    default = request.default if request.default in answers else None
-    confirm = default or (answers[0] if answers else "OK")
-    others = [b for b in answers if b != confirm]
-    return window_title(request.title), confirm, others, request.default in DISMISS
+    title = window_title(request.title)
+    enter_cancels = request.default in DISMISS
+    if len(answers) > 1:
+        return title, "OK", answers, enter_cancels
+    return title, answers[0] if answers else "OK", [], enter_cancels
+
+
+def first_choice(request: Ask, choices: list[str]) -> str:
+    """Return the choice picked when the popup opens: the default, else the first."""
+    return request.default if request.default in choices else choices[0]
 
 
 def body_text(request: Ask | Message | Error) -> str:
@@ -56,6 +69,15 @@ def body_text(request: Ask | Message | Error) -> str:
     return request.text
 
 
+def _choices(self, context):
+    _choice_items.clear()
+    prompt = getattr(host.runner(), "current", None)
+    if prompt is not None and isinstance(prompt.request, Ask):
+        choices = layout_of(prompt.request)[2]
+        _choice_items.extend((str(i), label, "") for i, label in enumerate(choices))
+    return _choice_items or [("0", "OK", "")]
+
+
 class LORE_OT_dialog(bpy.types.Operator):
     """Show a Lore question or message"""
 
@@ -64,6 +86,9 @@ class LORE_OT_dialog(bpy.types.Operator):
     bl_options = {"INTERNAL"}  # noqa: RUF012 - Blender reads a set
 
     token: bpy.props.IntProperty(options={"SKIP_SAVE"})  # type: ignore[valid-type]
+    choice: bpy.props.EnumProperty(  # type: ignore[valid-type]
+        name="Answer", items=_choices, options={"SKIP_SAVE"}
+    )
 
     def _prompt(self) -> host.Prompt | None:
         prompt = getattr(host.runner(), "current", None)
@@ -73,8 +98,11 @@ class LORE_OT_dialog(bpy.types.Operator):
         prompt = self._prompt()
         if prompt is None:
             return {"CANCELLED"}
-        title, confirm, _others, enter_cancels = layout_of(prompt.request)
-        width = min(800, max(360, 7 * max(len(line) for line in text_lines(body_text(prompt.request)))))
+        title, confirm, choices, enter_cancels = layout_of(prompt.request)
+        if choices:
+            self.choice = str(choices.index(first_choice(prompt.request, choices)))
+        lines = text_lines(body_text(prompt.request))
+        width = min(800, max(360, 7 * max(len(line) for line in lines)))
         return context.window_manager.invoke_props_dialog(
             self, width=width, title=title, confirm_text=confirm, cancel_default=enter_cancels
         )
@@ -86,41 +114,18 @@ class LORE_OT_dialog(bpy.types.Operator):
         column = self.layout.column(align=True)
         for line in text_lines(body_text(prompt.request)):
             column.label(text=line)
-        _title, _confirm, others, _enter = layout_of(prompt.request)
-        if others:
-            row = self.layout.row()
-            for label in others:
-                button = row.operator(LORE_OT_dialog_answer.bl_idname, text=label)
-                button.token = self.token
-                button.choice = label
+        if layout_of(prompt.request)[2]:
+            self.layout.row().prop(self, "choice", expand=True)
 
     def execute(self, context):
         prompt = self._prompt()
         if prompt is not None:
-            _title, confirm, _others, _enter = layout_of(prompt.request)
-            host.runner().answer(self.token, confirm)
+            _title, confirm, choices, _enter = layout_of(prompt.request)
+            host.runner().answer(self.token, choices[int(self.choice)] if choices else confirm)
         return {"FINISHED"}
 
     def cancel(self, context):
         host.runner().answer(self.token, None)
 
 
-class LORE_OT_dialog_answer(bpy.types.Operator):
-    """Answer the open Lore question with this choice"""
-
-    bl_idname = "lore.dialog_answer"
-    bl_label = "Answer"
-    bl_options = {"INTERNAL"}  # noqa: RUF012 - Blender reads a set
-
-    token: bpy.props.IntProperty(options={"SKIP_SAVE"})  # type: ignore[valid-type]
-    choice: bpy.props.StringProperty(options={"SKIP_SAVE"})  # type: ignore[valid-type]
-
-    def execute(self, context):
-        host.runner().answer(self.token, self.choice)
-        for window in context.window_manager.windows:
-            for area in window.screen.areas:
-                area.tag_redraw()
-        return {"FINISHED"}
-
-
-CLASSES = (LORE_OT_dialog, LORE_OT_dialog_answer)
+CLASSES = (LORE_OT_dialog,)

@@ -20,6 +20,7 @@ from pathlib import Path
 from typing import Any
 
 import bpy
+
 from lore_dcc.blender import host, outputs
 from lore_dcc.blender.flow import Error
 from lore_dcc.errors import NotAWorkingCopy

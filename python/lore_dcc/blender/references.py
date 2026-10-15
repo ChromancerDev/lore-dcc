@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Any
 
 import bpy
+
 from lore_dcc.references import SceneReferences, split_references
 
 # bpy.data collection, label for messages

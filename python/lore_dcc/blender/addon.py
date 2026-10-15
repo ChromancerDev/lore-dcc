@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 
 import bpy
+
 from lore_dcc.blender import commit_ui, dialogs, hooks, host, operators
 
 logger = logging.getLogger(__name__)

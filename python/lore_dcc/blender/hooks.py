@@ -15,6 +15,7 @@ from typing import Any
 
 import bpy
 from bpy.app.handlers import persistent
+
 from lore_dcc.blender import actions, host
 from lore_dcc.blender.flow import Ask, Error, Message, Run
 from lore_dcc.errors import LoreError, NotAWorkingCopy
