@@ -149,3 +149,17 @@ def test_classify_compares_paths_case_insensitively_only_on_windows(
     monkeypatch.setattr(locks, "CASE_INSENSITIVE", False)
     assert locks.classify("scenes/shot.HIP", records, ME) is LockState.NOT_LOCKED
     assert locks.path_key("A/B.hip") == "A/B.hip"
+
+
+def test_extra_lockable_adds_blend_and_never_its_backups(tmp_path: Path) -> None:
+    current = settings.load_settings(tmp_path, extra_lockable=(".blend",))
+    assert current.is_lockable("shots/sh010.blend")
+    assert not current.is_lockable("shots/sh010.blend1")
+    assert not current.is_lockable("shots/sh010.blend12")
+    assert not settings.load_settings(tmp_path).is_lockable("shots/sh010.blend")
+
+
+def test_settings_remove_beats_extra_lockable(tmp_path: Path) -> None:
+    data = {"version": 1, "lockable": {"remove": [".blend"]}}
+    (tmp_path / settings.SETTINGS_FILE).write_text(json.dumps(data), encoding="utf-8")
+    assert not settings.load_settings(tmp_path, (".blend",)).is_lockable("a.blend")

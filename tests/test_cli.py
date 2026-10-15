@@ -251,3 +251,17 @@ def test_sync_roots_refuses_empty_and_oversized(tmp_path: Path) -> None:
         lore.sync_roots([])
     with pytest.raises(ValueError):
         lore.sync_roots(["x" * 100] * 1000)
+
+
+def test_dependency_calls_use_the_link_tag(tmp_path: Path) -> None:
+    runner = FakeRunner((0, f"{tmp_path}/s.blend:\n  tex/a.png [blender]\n"))
+    lore = make(tmp_path, runner)
+    lore.link_tag = "blender"
+    assert lore.dependency_list(Path("s.blend")) == ("tex/a.png",)
+    lore.dependency_add(Path("s.blend"), [Path("tex/a.png")])
+    lore.dependency_remove(Path("s.blend"), [Path("tex/b.png")])
+    assert [call[5:7] for call in runner.calls] == [
+        ["list", "--tag=blender"],
+        ["add", "--tag=blender"],
+        ["remove", "--tag=blender"],
+    ]

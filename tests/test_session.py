@@ -1070,3 +1070,22 @@ def test_behind_skips_a_branch_that_is_not_behind(env: Env, note: str) -> None:
     env.runner.diff_out = "M a.bgeo\n"
     assert env.session.behind("scene.hip") == session_module.BehindReport(False, ())
     assert "revision diff" not in env.runner.verbs()
+
+
+def test_session_for_keeps_one_session_per_profile(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root = tmp_path.resolve()
+    (root / ".lore").mkdir()
+    runner = ScriptRunner(root)
+    monkeypatch.setattr(
+        session_module, "LoreCli", lambda p: LoreCli(p, executable="lore", runner=runner)
+    )
+    monkeypatch.setattr(session_module, "_SESSIONS", {})
+    houdini = session_for(root / "a.hip")
+    blender = session_for(root / "a.blend", session_module.BLENDER)
+    assert houdini is not blender
+    assert blender is session_for(root, session_module.BLENDER)
+    assert (houdini.lore.link_tag, blender.lore.link_tag) == ("houdini", "blender")
+    assert blender.settings.is_lockable("a.blend")
+    assert not houdini.settings.is_lockable("a.blend")
