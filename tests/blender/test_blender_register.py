@@ -164,8 +164,8 @@ def test_files_in_and_inside(tmp_path) -> None:
         (tmp_path / "out" / name).write_text("x")
     folder = str(tmp_path / "out")
     assert [Path(p).name for p in outputs.files_in(folder, recursive=False)] == ["a.png", "b.txt"]
-    images = outputs.files_in(folder, recursive=True, suffixes=outputs.IMAGE_SUFFIXES)
-    assert sorted(Path(p).name for p in images) == ["a.png", "c.png"]
+    everything = outputs.files_in(folder, recursive=True)
+    assert sorted(Path(p).name for p in everything) == ["a.png", "b.txt", "c.png"]
     assert outputs.files_in(str(tmp_path / "missing"), recursive=True) == []
     found = outputs.inside([str(tmp_path / "out" / "a.png"), "", "Z:/elsewhere/a.png"], tmp_path)
     assert found == [(tmp_path / "out" / "a.png").resolve()]

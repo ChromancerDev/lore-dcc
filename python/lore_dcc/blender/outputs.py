@@ -1,15 +1,18 @@
 """Find the files a scene writes: render frames, compositor File Output images and bakes.
 
-Render frames come from the scene's output path over its frame range. A
-compositor File Output node and a bake each own a folder: the images in a
-File Output folder, and every file under a bake folder, are its outputs.
-`frames`, `files_in` and `inside` are pure Python.
+Render frames come from the scene's output path over its frame range.
+Compositor File Output nodes, also those inside node groups, give the exact
+file of each slot for each frame, named the way Blender 5.2 names them. A
+bake owns its folder: every file under it is an output. `frames`,
+`files_in`, `inside`, `frame_name` and `file_output_names` are pure Python.
 """
 
 from __future__ import annotations
 
 import os
+import re
 from collections.abc import Iterable
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -18,13 +21,15 @@ import bpy
 MAX_FRAMES = 100_000
 MAX_FILES = 100_000
 
-IMAGE_SUFFIXES = frozenset(
-    {
-        ".png", ".jpg", ".jpeg", ".exr", ".tif", ".tiff", ".tga", ".bmp", ".hdr", ".webp",
-        ".dpx", ".cin", ".jp2", ".j2c", ".rgb", ".sgi",
-        ".mp4", ".mkv", ".mov", ".avi", ".ogv", ".webm", ".mpg", ".flv",
-    }
-)  # fmt: skip
+# File Output node file_format -> extension Blender writes.
+EXTENSIONS = {
+    "BMP": ".bmp", "IRIS": ".rgb", "PNG": ".png", "JPEG": ".jpg", "JPEG2000": ".jp2",
+    "TARGA": ".tga", "TARGA_RAW": ".tga", "CINEON": ".cin", "DPX": ".dpx",
+    "OPEN_EXR": ".exr", "OPEN_EXR_MULTILAYER": ".exr", "HDR": ".hdr", "TIFF": ".tif",
+    "WEBP": ".webp",
+}  # fmt: skip
+
+_HASHES = re.compile(r"#+")
 
 
 def frames(start: int, end: int, step: int) -> tuple[list[int], int]:
@@ -34,21 +39,17 @@ def frames(start: int, end: int, step: int) -> tuple[list[int], int]:
     return list(range(start, start + min(total, MAX_FRAMES) * step, step)), total
 
 
-def files_in(folder: str, *, recursive: bool, suffixes: frozenset[str] | None = None) -> list[str]:
-    """Return the files in `folder`, optionally only those with one of `suffixes`.
-
-    A missing folder gives nothing. At most MAX_FILES files are returned.
-    """
+def files_in(folder: str, *, recursive: bool) -> list[str]:
+    """Return the files in `folder`. A missing folder gives nothing. At most MAX_FILES."""
     if not os.path.isdir(folder):
         return []
     found: list[str] = []
     walker = os.walk(folder) if recursive else [next(os.walk(folder))]
     for current, _dirs, names in walker:
         for name in sorted(names):
-            if suffixes is None or os.path.splitext(name)[1].lower() in suffixes:
-                found.append(os.path.join(current, name))
-                if len(found) >= MAX_FILES:
-                    return found
+            found.append(os.path.join(current, name))
+            if len(found) >= MAX_FILES:
+                return found
     return found
 
 
@@ -82,16 +83,87 @@ def _abs(path: str, library: Any = None) -> str:
     return os.path.normpath(bpy.path.abspath(path, library=library))
 
 
-def file_output_folders(scene: Any) -> list[str]:
-    """Return the folders the scene's compositor File Output nodes write to."""
-    tree = getattr(scene, "compositing_node_group", None)
-    if tree is None:
-        return []
+@dataclass(frozen=True)
+class Slot:
+    """One file a File Output node writes per frame.
+
+    Attributes:
+        name: The node's file name plus the slot name, which may hold folders.
+        extension: The extension with its dot, or "" when the node writes none.
+    """
+
+    name: str
+    extension: str
+
+
+def frame_name(name: str, frame: int) -> str:
+    """Return `name` with the frame in it the way Blender writes it.
+
+    The last run of `#` becomes the zero-padded frame; without one, a
+    four-digit frame is appended.
+    """
+    runs = list(_HASHES.finditer(name))
+    if not runs:
+        return f"{name}{frame:04d}"
+    last = runs[-1]
+    return f"{name[: last.start()]}{frame:0{len(last.group())}d}{name[last.end() :]}"
+
+
+def file_output_names(directory: str, slots: Iterable[Slot], numbers: Iterable[int]) -> list[str]:
+    """Return every file the slots write over `numbers`, inside `directory`."""
+    numbers = list(numbers)
     return [
-        _abs(node.directory)
-        for node in tree.nodes
-        if node.bl_idname == "CompositorNodeOutputFile" and not node.mute and node.directory
+        os.path.normpath(os.path.join(directory, frame_name(slot.name, n) + slot.extension))
+        for slot in slots
+        for n in numbers
     ]
+
+
+def _file_output_nodes(tree: Any, seen: set[int]) -> Iterable[Any]:
+    if tree is None or id(tree) in seen:
+        return
+    seen.add(id(tree))
+    for node in tree.nodes:
+        if node.mute:
+            continue
+        if node.type == "OUTPUT_FILE":
+            yield node
+        elif node.type == "GROUP":
+            yield from _file_output_nodes(getattr(node, "node_tree", None), seen)
+
+
+def _slots(node: Any, blend_name: str, notes: list[str] | None) -> list[Slot]:
+    base = node.file_name.replace("{blend_name}", blend_name)
+    if "{" in base:
+        if notes is not None:
+            notes.append(f"File Output {node.name}: path variables in {node.file_name!r} are not read.")
+        return []
+    media = node.format.media_type
+    if media == "MULTI_LAYER_IMAGE":
+        return [Slot(base, ".exr" if node.use_file_extension else "")]
+    if media != "IMAGE":
+        if notes is not None:
+            notes.append(f"File Output {node.name}: video outputs are not checked.")
+        return []
+    slots = []
+    for item in node.file_output_items:
+        fmt = item.format if item.override_node_format else node.format
+        extension = EXTENSIONS.get(fmt.file_format, "") if node.use_file_extension else ""
+        slots.append(Slot(base + item.name, extension))
+    return slots
+
+
+def file_output_paths(scene: Any, notes: list[str] | None = None) -> list[str]:
+    """Return the files the scene's compositor File Output nodes write over its frame range."""
+    tree = getattr(scene, "compositing_node_group", None)
+    numbers, _total = frames(scene.frame_start, scene.frame_end, scene.frame_step)
+    blend_name = Path(bpy.data.filepath).stem if bpy.data.filepath else "Unsaved"
+    paths: list[str] = []
+    for node in _file_output_nodes(tree, set()):
+        if node.directory:
+            slots = _slots(node, blend_name, notes)
+            paths += file_output_names(_abs(node.directory), slots, numbers)
+    return paths
 
 
 def _point_caches(obj: Any) -> Iterable[Any]:
@@ -140,12 +212,10 @@ def bake_folders(scene: Any) -> list[str]:
 def scene_outputs(scene: Any, root: Path, notes: list[str] | None = None) -> list[Path]:
     """Return every file inside `root` the scene writes or has written.
 
-    Render frames are listed whether or not they exist yet. File Output and
-    bake folders give the files already in them.
+    Render frames and File Output files are listed whether or not they exist
+    yet. Bake folders give the files already in them.
     """
-    values = render_paths(scene, notes)
-    for folder in file_output_folders(scene):
-        values += files_in(folder, recursive=False, suffixes=IMAGE_SUFFIXES)
+    values = render_paths(scene, notes) + file_output_paths(scene, notes)
     for folder in bake_folders(scene):
         values += files_in(folder, recursive=True)
     return inside(values, root)
@@ -153,7 +223,4 @@ def scene_outputs(scene: Any, root: Path, notes: list[str] | None = None) -> lis
 
 def render_outputs(scene: Any, root: Path, notes: list[str] | None = None) -> list[Path]:
     """Return the files inside `root` one render of the scene writes: frames and File Output images."""
-    values = render_paths(scene, notes)
-    for folder in file_output_folders(scene):
-        values += files_in(folder, recursive=False, suffixes=IMAGE_SUFFIXES)
-    return inside(values, root)
+    return inside(render_paths(scene, notes) + file_output_paths(scene, notes), root)

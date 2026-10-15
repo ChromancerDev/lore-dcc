@@ -42,7 +42,7 @@ Sign in with `lore login` in a terminal. The plugin never handles credentials.
 
 Every file a scene reads, such as File SOP caches, Alembic and FBX files, textures, USD layers and the HDA libraries it uses, is a reference. When the plugin stages or commits a hip, it records the references inside the working copy as Lore dependency links tagged `houdini`, and removes links the scene no longer uses. New references show in the Commit dialog under `Dependencies` so they commit with the hip. References outside the working copy get a warning, since other users will not have them.
 
-In Blender the references are the files of linked libraries, images (every UDIM tile), sounds, movie clips, Alembic and USD cache files, fonts, volumes and external text files. Packed data and Blender's own bundled files are not references. The links are tagged `blender`, and a .blend counts as lockable. Blender's numbered backups, such as `shot.blend1`, never show in the Commit dialog.
+In Blender the references are the files of linked libraries, images (every UDIM tile, and every frame of an image sequence on disk), sounds, movie clips, Alembic and USD cache files, fonts, volumes (every frame of a sequence) and external text files. Packed data and Blender's own bundled files are not references. The links are tagged `blender`, and a .blend counts as lockable. Blender's numbered backups, such as `shot.blend1`, never show in the Commit dialog.
 
 `Sync Dependencies` updates only the references that are newer on the server and reloads them in Houdini. It never touches the open hip unless the hip is behind too and you pick `Sync and reopen`. Files with local changes are skipped and listed.
 

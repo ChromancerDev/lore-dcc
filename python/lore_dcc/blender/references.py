@@ -1,14 +1,16 @@
 """Find the files the open .blend reads, and reload them after a sync.
 
 References are the external files of linked libraries, images (every UDIM
-tile), sounds, movie clips, Alembic and USD cache files, fonts, volumes and
+tile and every frame of a sequence on disk), sounds, movie clips, Alembic and USD cache files, fonts, volumes and
 external text files. Packed and generated data, and Blender's own bundled
-files, are not references. `udim_paths` and `own_file` are pure Python.
+files, are not references. `udim_paths`, `sequence_paths` and `own_file` are
+pure Python.
 """
 
 from __future__ import annotations
 
 import os
+import re
 from collections.abc import Iterable, Iterator, Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -30,6 +32,7 @@ KINDS = (
     ("texts", "Text"),
 )
 
+_TRAILING_DIGITS = re.compile(r"^(.*?)(\d+)$")
 _UDIM = "<UDIM>"
 _UVTILE = "<UVTILE>"
 
@@ -43,6 +46,31 @@ def udim_paths(path: str, tiles: Iterable[int]) -> list[str]:
         u, v = (tile - 1001) % 10 + 1, (tile - 1001) // 10 + 1
         found.append(path.replace(_UDIM, str(tile)).replace(_UVTILE, f"u{u}_v{v}"))
     return found
+
+
+def sequence_paths(path: str) -> list[str]:
+    """Return every frame on disk of the sequence whose frame `path` names, sorted.
+
+    The frame number is the last run of digits before the extension; any
+    file in the same folder with the same text around a run of at least as
+    many digits is a frame. A name without digits, or a sequence with no frame
+    on disk, gives `[path]`.
+    """
+    folder, name = os.path.split(path)
+    stem, extension = os.path.splitext(name)
+    match = _TRAILING_DIGITS.match(stem)
+    if match is None:
+        return [path]
+    head, digits = match.groups()
+    pattern = re.compile(
+        f"{re.escape(head)}\\d{{{len(digits)},}}{re.escape(extension)}", re.IGNORECASE
+    )
+    try:
+        names = os.listdir(folder)
+    except OSError:
+        return [path]
+    found = sorted(os.path.join(folder, n) for n in names if pattern.fullmatch(n))
+    return found or [path]
 
 
 def own_file(path: str, own_folders: Sequence[str]) -> bool:
@@ -74,6 +102,8 @@ def files_of(block: Any) -> list[str]:
     path = os.path.normpath(bpy.path.abspath(filepath, library=block.library))
     if getattr(block, "source", "") == "TILED":
         return udim_paths(path, [tile.number for tile in block.tiles])
+    if getattr(block, "source", "") == "SEQUENCE" or getattr(block, "is_sequence", False):
+        return sequence_paths(path)
     return [path]
 
 
