@@ -1,0 +1,18 @@
+schema_version = "1.0.0"
+
+id = "lore_dcc"
+version = "0.1.0"
+name = "Lore"
+tagline = "Lore version control: lock, stage, commit and push from Blender"
+maintainer = "ChromancerDev"
+type = "add-on"
+website = "https://github.com/ChromancerDev/lore-dcc"
+tags = ["Pipeline", "System"]
+
+blender_version_min = "5.2.0"
+
+license = ["SPDX:MIT"]
+
+[permissions]
+files = "Read and write files in the Lore working copy"
+network = "Run the lore command, which talks to the Lore server"
