@@ -1,0 +1,65 @@
+name: Bug report
+description: Something in the Lore plugin did not work as expected.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        File a Bug in the Lore menu fills in the DCC, versions and OS for you.
+        Leave out server addresses, user names and anything private.
+  - type: input
+    id: dcc
+    attributes:
+      label: DCC
+      description: Houdini or Blender.
+      placeholder: Houdini
+    validations:
+      required: true
+  - type: input
+    id: dcc-version
+    attributes:
+      label: DCC version
+      placeholder: "22.0.429"
+    validations:
+      required: true
+  - type: input
+    id: plugin-version
+    attributes:
+      label: Plugin version
+      placeholder: "0.1.0"
+    validations:
+      required: true
+  - type: input
+    id: lore-version
+    attributes:
+      label: Lore version
+      description: The output of `lore --version`.
+      placeholder: "0.9.0+783"
+    validations:
+      required: true
+  - type: input
+    id: os
+    attributes:
+      label: Operating system
+      placeholder: Windows-11-10.0.26100-SP0
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What you did, what you expected, and what you got instead.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Open a hip inside a Lore working copy
+        2. Lore > Lock
+        3. ...
+  - type: textarea
+    id: output
+    attributes:
+      label: Error text or log
+      description: The text of any Lore dialog, and Houdini's console or Blender's system console output.
+      render: text

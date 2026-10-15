@@ -41,6 +41,13 @@
         <label>Enable/Disable</label>
         <scriptCode><![CDATA[from lore_dcc.houdini import actions; actions.toggle_enabled()]]></scriptCode>
       </scriptItem>
+
+      <separatorItem/>
+
+      <scriptItem id="lore_menu_file_a_bug">
+        <label>File a Bug</label>
+        <scriptCode><![CDATA[from lore_dcc.houdini import actions; actions.file_a_bug()]]></scriptCode>
+      </scriptItem>
     </subMenu>
   </menuBar>
 </mainMenu>

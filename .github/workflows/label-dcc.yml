@@ -1,0 +1,25 @@
+name: label-dcc
+
+on:
+  issues:
+    types: [opened, edited]
+
+permissions:
+  issues: write
+
+jobs:
+  label:
+    runs-on: ubuntu-latest
+    steps:
+      - env:
+          GH_TOKEN: ${{ github.token }}
+          BODY: ${{ github.event.issue.body }}
+          NUMBER: ${{ github.event.issue.number }}
+        run: |
+          dcc=$(printf '%s\n' "$BODY" | awk '/^### DCC$/ {getline; getline; print tolower($0); exit}')
+          case "$dcc" in
+            *houdini*) label=houdini ;;
+            *blender*) label=blender ;;
+            *) exit 0 ;;
+          esac
+          gh issue edit "$NUMBER" --repo "$GITHUB_REPOSITORY" --add-label "$label"

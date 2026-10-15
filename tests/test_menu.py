@@ -32,13 +32,13 @@ def test_menu_sits_before_help_and_lists_the_actions_in_order() -> None:
     items = [(i.findtext("label"), i.findtext("scriptCode")) for i in sub.findall("scriptItem")]
     assert [label for label, _ in items] == [
         "Info", "Lock", "Discard changes", "Collect Outputs", "Sync Dependencies", "Commit",
-        "Enable/Disable",
+        "Enable/Disable", "File a Bug",
     ]  # fmt: skip
     children = [child.tag for child in sub if child.tag in ("scriptItem", "separatorItem")]
-    assert children.index("separatorItem") == 6
+    assert [i for i, tag in enumerate(children) if tag == "separatorItem"] == [6, 8]
     assert [_called(code or "") for _, code in items] == [
         "info", "lock", "discard", "collect_outputs", "sync_dependencies", "commit",
-        "toggle_enabled",
+        "toggle_enabled", "file_a_bug",
     ]  # fmt: skip
 
 
@@ -54,11 +54,11 @@ def test_every_menu_item_names_a_public_action() -> None:
         assert _called(item.findtext("scriptCode") or "") in defined
 
 
-def test_menu_and_shelf_offer_the_same_actions() -> None:
+def test_menu_and_shelf_offer_the_same_actions_except_file_a_bug() -> None:
     shelf = {
         _called(tool.findtext("script") or "") for tool in ET.parse(SHELF).getroot().iter("tool")
     }
     sub = ET.parse(MENU).getroot().find("menuBar/subMenu")
     assert sub is not None
     menu = {_called(i.findtext("scriptCode") or "") for i in sub.findall("scriptItem")}
-    assert menu == shelf
+    assert menu - {"file_a_bug"} == shelf

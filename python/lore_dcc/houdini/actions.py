@@ -153,6 +153,15 @@ def toggle_enabled() -> None:
 
 
 @_reported
+def file_a_bug() -> None:
+    """Open a prefilled bug report on GitHub in the default browser."""
+    from lore_dcc import bugs
+
+    if not bugs.open_report("Houdini", hou.applicationVersionString()):
+        host.message("Lore - File a Bug", f"Open this link to file a bug:\n{bugs.NEW_ISSUE}")
+
+
+@_reported
 def lock() -> None:
     """Lock the open file."""
     file = _saved_hip()
