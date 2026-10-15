@@ -1,6 +1,6 @@
 [project]
 name = "lore-dcc"
-version = "0.1.0.dev0"
+version = "0.1.0"
 description = "Lore version control inside DCCs. Houdini first."
 license = "MIT"
 requires-python = ">=3.13"

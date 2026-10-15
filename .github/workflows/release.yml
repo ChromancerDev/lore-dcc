@@ -1,0 +1,26 @@
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  houdini:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check the tag matches the package version
+        run: |
+          version=$(sed -n 's/^__version__ = "\(.*\)"/\1/p' python/lore_dcc/__init__.py)
+          test "v$version" = "$GITHUB_REF_NAME" || { echo "tag $GITHUB_REF_NAME != v$version"; exit 1; }
+          echo "VERSION=$version" >> "$GITHUB_ENV"
+      - name: Build the Houdini zip
+        run: |
+          zip -r "lore-dcc-houdini-$VERSION.zip" python houdini LICENSE README.md -x '*__pycache__*' '*.pyc'
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" "lore-dcc-houdini-$VERSION.zip" --title "$GITHUB_REF_NAME" --generate-notes --verify-tag

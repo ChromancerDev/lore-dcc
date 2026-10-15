@@ -2,7 +2,9 @@
 
 Lore version control inside DCC applications, in the spirit of SideFX Labs `P4Houdini`. Lock, stage, commit and push from inside the app, with Lore's own words and rules.
 
-**Status:** in development. No release yet. v1 targets Houdini 22 on Windows. The code is portable, but Linux is untested.
+**Status:** first release, 0.1.0, for Houdini 22. Tested on Windows. The code is portable, but Linux is untested. Blender is in development.
+
+Found a bug? Use `Lore > File a Bug` in Houdini, or [open an issue](https://github.com/ChromancerDev/lore-dcc/issues/new?template=bug_report.yml).
 
 ## Requirements
 
@@ -12,20 +14,10 @@ Lore version control inside DCC applications, in the spirit of SideFX Labs `P4Ho
 
 Sign in with `lore login` in a terminal. The plugin never handles credentials.
 
-## Install in Houdini
+## Install
 
-Each release ships one zip per DCC. The Houdini zip, `lore-dcc-houdini-<version>.zip`, holds two sibling folders, `python/` and `houdini/`. Keep them together.
-
-1. Unzip it. For a team, unzip into your Lore project, for example `<project>/tools/lore-dcc/`, and commit it to Lore so every artist gets it on their next sync. For yourself only, unzip anywhere.
-2. Point Houdini at the `houdini/` folder. Pick one:
-   - Create `packages/lore_dcc_loader.json` inside your Houdini user folder, with one line of JSON, changing the path to yours. To find the user folder, run `hou.homeHoudiniDirectory()` in Houdini's Python Shell. On Windows it sits under `Documents` unless `HOME` is set, so a shell such as Git Bash that sets `HOME` can point Houdini at a different folder.
-     ```json
-     { "package_path": "D:/projects/mygame/tools/lore-dcc/houdini" }
-     ```
-   - Or set the environment variable `HOUDINI_PACKAGE_DIR` to that same folder before Houdini starts.
-3. Start Houdini 22. On the shelf bar, click `+`, choose `Shelves`, and tick `Lore`.
-
-The package only enables itself in Houdini 22 or newer. The plugin needs no other setup: it finds the Lore working copy from the open file.
+- Houdini: [docs/install/houdini.md](docs/install/houdini.md)
+- Hooking it into your own pipeline, scripts and launchers: [docs/integration.md](docs/integration.md)
 
 ## Using it
 
