@@ -44,7 +44,12 @@ class LoreCli:
         executable: Path to `lore`. Found on PATH when omitted.
         timeout: Seconds before a command is abandoned.
         runner: Replaces `subprocess.run` in tests.
+
+    Attributes:
+        link_tag: The tag on the dependency links this DCC reads and writes.
     """
+
+    link_tag: str = "houdini"
 
     def __init__(
         self,
@@ -169,30 +174,33 @@ class LoreCli:
         return infos
 
     def dependency_list(self, source: Path) -> tuple[str, ...]:
-        """Return the repo-relative paths `source` links to with the `houdini` tag.
+        """Return the repo-relative paths `source` links to with `link_tag`.
 
         Raises:
             LoreCommandError: Lore failed, e.g. `source` is neither tracked nor staged.
         """
         return parsers.parse_dependency_list(
-            self._run_once(["file", "dependency", "list", "--tag=houdini", self._one(source)])
+            self._run_once(["file", "dependency", "list", f"--tag={self.link_tag}", self._one(source)])
         )
 
     def dependency_add(self, source: Path, deps: Sequence[Path]) -> None:
-        """Link `source` to `deps` with the `houdini` tag. All or nothing in Lore.
+        """Link `source` to `deps` with `link_tag`. All or nothing in Lore.
 
         Both ends must be tracked or staged. Does nothing when `deps` is empty.
         """
         if deps:
-            self.run("file", "dependency", "add", "--tag=houdini", self._one(source), paths=deps)
+            self.run(
+                "file", "dependency", "add", f"--tag={self.link_tag}", self._one(source), paths=deps
+            )
 
     def dependency_remove(self, source: Path, deps: Sequence[Path]) -> None:
-        """Drop the `houdini` tag from links `source` -> `deps`. Missing links are fine.
+        """Drop `link_tag` from links `source` -> `deps`. Missing links are fine.
 
         Does nothing when `deps` is empty.
         """
         if deps:
-            self.run("file", "dependency", "remove", "--tag=houdini", self._one(source), paths=deps)
+            tag = f"--tag={self.link_tag}"
+            self.run("file", "dependency", "remove", tag, self._one(source), paths=deps)
 
     def revision_diff(self, source: str, target: str) -> tuple[parsers.Change, ...]:
         """Return the paths that changed between two revision signatures.

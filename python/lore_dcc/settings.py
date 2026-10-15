@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -42,24 +43,29 @@ class Settings:
         return any(name.endswith(suffix) for suffix in self.lockable)
 
 
-def load_settings(root: Path) -> Settings:
+def load_settings(root: Path, extra_lockable: Iterable[str] = ()) -> Settings:
     """Read `lore-dcc.json` from a working copy root, or return the defaults.
+
+    `extra_lockable` adds a DCC's own suffixes to DEFAULT_LOCKABLE; the
+    file's `lockable.remove` still removes them.
 
     Raises:
         SettingsError: The file exists but is not valid.
     """
     path = Path(root) / SETTINGS_FILE
     if not path.is_file():
-        return _build(set(), set(), {})
+        return _build(set(), set(), {}, extra_lockable)
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
         raise SettingsError(f"{path}: {exc}") from exc
-    return parse_settings(data, source=str(path))
+    return parse_settings(data, source=str(path), extra_lockable=extra_lockable)
 
 
-def parse_settings(data: object, source: str = SETTINGS_FILE) -> Settings:
-    """Validate the parsed JSON of a settings file.
+def parse_settings(
+    data: object, source: str = SETTINGS_FILE, extra_lockable: Iterable[str] = ()
+) -> Settings:
+    """Validate the parsed JSON of a settings file. `extra_lockable` is as for load_settings.
 
     Raises:
         SettingsError: Unknown keys, a wrong version, or wrong value types.
@@ -79,7 +85,7 @@ def parse_settings(data: object, source: str = SETTINGS_FILE) -> Settings:
     houdini = data.get("houdini", {})
     if not isinstance(houdini, dict):
         raise SettingsError(f"{source}: houdini must be an object")
-    return _build(add, remove, houdini)
+    return _build(add, remove, houdini, extra_lockable)
 
 
 def _suffixes(value: object, where: str) -> set[str]:
@@ -90,8 +96,10 @@ def _suffixes(value: object, where: str) -> set[str]:
     return {item.lower() for item in value}
 
 
-def _build(add: set[str], remove: set[str], houdini: dict) -> Settings:
-    suffixes = (set(DEFAULT_LOCKABLE) | add) - remove
+def _build(
+    add: set[str], remove: set[str], houdini: dict, extra: Iterable[str] = ()
+) -> Settings:
+    suffixes = (set(DEFAULT_LOCKABLE) | set(extra) | add) - remove
     return Settings(
         lockable=tuple(sorted(suffixes, key=lambda s: (-len(s), s))), houdini=houdini
     )

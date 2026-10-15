@@ -426,7 +426,7 @@ class Session:
             self.references = {rel: unique}
 
     def update_links(self, source: Path | str) -> None:
-        """Make `source`'s `houdini` links match its remembered references.
+        """Make `source`'s links, tagged with the DCC's link tag, match its remembered references.
 
         Does nothing when no list is remembered for `source` or when `source`
         is neither tracked nor staged. Adds links to references that exist and
@@ -731,15 +731,33 @@ def _join(*parts: str) -> str:
     return "\n".join(part.strip() for part in parts if part.strip())
 
 
-_SESSIONS: dict[Path, Session] = {}
+@dataclass(frozen=True)
+class DccProfile:
+    """What differs between DCCs in the shared core.
+
+    Attributes:
+        name: Cache key, one per DCC.
+        link_tag: Tag on the dependency links the DCC records.
+        lockable: Suffixes lockable on top of `settings.DEFAULT_LOCKABLE`.
+    """
+
+    name: str
+    link_tag: str
+    lockable: tuple[str, ...] = ()
+
+
+HOUDINI = DccProfile("houdini", "houdini")
+BLENDER = DccProfile("blender", "blender", (".blend",))
+
+_SESSIONS: dict[tuple[Path, str], Session] = {}
 _SESSIONS_LOCK = threading.Lock()
 
 
-def session_for(path: Path | str) -> Session:
+def session_for(path: Path | str, profile: DccProfile = HOUDINI) -> Session:
     """Return the cached Session for the working copy holding `path`.
 
-    The first call for a working copy runs `lore --version` and reads
-    `lore-dcc.json`; later calls reuse the Session. Failures are not cached.
+    The first call for a working copy and profile runs `lore --version` and
+    reads `lore-dcc.json`; later calls reuse the Session. Failures are not cached.
 
     Raises:
         NotAWorkingCopy: `path` is not inside a Lore working copy.
@@ -749,10 +767,12 @@ def session_for(path: Path | str) -> Session:
     """
     workspace = find_workspace(Path(path))
     with _SESSIONS_LOCK:
-        session = _SESSIONS.get(workspace.root)
+        key = (workspace.root, profile.name)
+        session = _SESSIONS.get(key)
         if session is None:
             lore = LoreCli(workspace.root)
+            lore.link_tag = profile.link_tag
             lore.version()
-            session = Session(workspace, lore, load_settings(workspace.root))
-            _SESSIONS[workspace.root] = session
+            session = Session(workspace, lore, load_settings(workspace.root, profile.lockable))
+            _SESSIONS[key] = session
         return session

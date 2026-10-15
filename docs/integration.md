@@ -47,6 +47,25 @@ lore.stage(files)   # stages new files, releases locks on unchanged ones
 
 Paths may be absolute or use Houdini variables. Paths outside every working copy are ignored, so the same tool works in and out of Lore projects.
 
+## Call it from scripts (Blender)
+
+`lore_dcc.blender.api` is the supported surface for scripts. The extension ships the `lore_dcc` core as a Python wheel that Blender installs with it, so `import lore_dcc` works in any script once the extension is installed.
+
+**Exporters, bake scripts, batch tools.** Wrap the write with `lock` and `stage`:
+
+```python
+import lore_dcc.blender.api as lore
+
+files = ["//export/hero.fbx", "//tex/hero_albedo.exr"]
+lore.lock(files)    # raises if someone else holds a lock
+# ... write the files ...
+lore.stage(files)   # stages new files, releases locks on unchanged ones
+```
+
+Paths may be absolute or start with `//`, relative to the open .blend. Paths outside every working copy are ignored. These calls wait for Lore on the calling thread, since a script must not write before its lock is held. In the UI a refusal also shows a popup.
+
+**Renders.** `lore.pre_render(scene)` locks the tracked frames and compositor File Output images a render of `scene` will write. `lore.post_render(scene)` stages the new ones and releases locks on the ones that came out byte-identical. Ticking `Lock and collect render outputs` in `Properties > Output > Lore` runs both from Blender's render handlers. A refused lock cannot stop a render that has started: Blender ignores errors in render handlers. In the UI the refusal shows a popup, and in background renders (`blender -b`) it is printed to the console. Run `lore.pre_render()` in your own launcher script before `bpy.ops.render.render()` when a refusal must stop the render.
+
 ## Call the core from any Python
 
 Outside a DCC, for example in a publish script or a farm job, use the core directly. It needs Python 3.13 and `lore` on `PATH`.
@@ -64,7 +83,7 @@ session.prepare_write([path])        # locks it if tracked, raises if someone el
 result = session.finish_write([path])  # stages new files, releases unchanged locks
 ```
 
-`session_for` raises `NotAWorkingCopy` for a file outside a working copy and `LoreNotFound` when `lore` is not on `PATH`. Every failure the plugin raises is a subclass of `lore_dcc.errors.LoreError`. Modules under `lore_dcc.houdini` and `lore_dcc.ui` need Houdini and are not for standalone use.
+`session_for` raises `NotAWorkingCopy` for a file outside a working copy and `LoreNotFound` when `lore` is not on `PATH`. Every failure the plugin raises is a subclass of `lore_dcc.errors.LoreError`. Modules under `lore_dcc.houdini` and `lore_dcc.ui` need Houdini, and `lore_dcc.blender` needs Blender. They are not for standalone use.
 
 ## Per-project settings
 
@@ -72,7 +91,7 @@ Commit an optional `lore-dcc.json` at the root of the working copy to change whi
 
 ## Per-user settings
 
-`lore_dcc_prefs.json` in the Houdini user folder holds each artist's toggles. A studio can pre-seed it:
+`lore_dcc_prefs.json` in the Houdini user folder, or in Blender's config folder, holds each artist's toggles. A studio can pre-seed it:
 
 ```json
 {

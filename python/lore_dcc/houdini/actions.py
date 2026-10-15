@@ -10,7 +10,7 @@ import dataclasses
 import functools
 import logging
 import os
-from collections.abc import Callable, Sequence
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -19,18 +19,21 @@ import hou
 from lore_dcc.errors import LoreError, NotAWorkingCopy
 from lore_dcc.houdini import host, outputs, references
 from lore_dcc.locks import LockState, path_key
-from lore_dcc.session import (
-    BehindReport,
-    Session,
-    SyncResult,
-    WriteResult,
-    new_file_message,
+from lore_dcc.session import Session, new_file_message
+from lore_dcc.summaries import (
+    describe_write,
+    list_paths,
+    outside_text,
+    scene_behind_text,
+    sync_summary,
+    with_notes,
 )
 
 logger = logging.getLogger(__name__)
 
 TITLE = "Lore"
-_LISTED = 8
+
+__all__ = ["describe_write", "list_paths"]
 
 
 def _reported(func: Callable[..., None]) -> Callable[..., None]:
@@ -98,26 +101,6 @@ def _parm_file(parm: Any, *, must_exist: bool = False) -> str | None:
         host.message("Lore - Parameter File", f"{path} does not exist.")
         return None
     return path
-
-
-def _with_notes(text: str, notes: list[str]) -> str:
-    return "\n".join([text, *(f"Warning: {note}" for note in notes)])
-
-
-def describe_write(result: WriteResult) -> str:
-    """Return a short summary of what finish_write did."""
-    lines: list[str] = []
-    for label, paths in (
-        ("Staged (new)", result.staged),
-        ("Changed (lock kept)", result.changed),
-        ("Released (unchanged)", result.released),
-    ):
-        if paths:
-            lines.append(f"{label}: {len(paths)}")
-            lines += [f"    {p}" for p in paths[:_LISTED]]
-            if len(paths) > _LISTED:
-                lines.append(f"    and {len(paths) - _LISTED} more")
-    return "\n".join(lines) or "No output files changed."
 
 
 def node_has_library(node: Any) -> bool:
@@ -212,7 +195,7 @@ def sync_dependencies(confirm: bool = True) -> None:
         edited = _has_local_edits(session, file)
         choice = host.ask(
             "Lore - Scene Behind Server",
-            _scene_behind_text(report, edited),
+            scene_behind_text(report, edited),
             ["Continue", "Cancel"] if edited else ["Continue", "Sync and reopen", "Cancel"],
             default="Continue" if edited else "Sync and reopen",
         )
@@ -249,7 +232,7 @@ def sync_dependencies(confirm: bool = True) -> None:
     reopened = reopen and any(path_key(p) == hip_key for p in result.synced)
     if reopened:
         hou.hipFile.load(file, suppress_save_prompt=True)
-    host.message("Lore - Sync Dependencies", _sync_summary(result, reopen and not reopened))
+    host.message("Lore - Sync Dependencies", sync_summary(result, reopen and not reopened))
 
 
 @_reported
@@ -302,7 +285,7 @@ def lock_node_outputs(node: Any) -> None:
         text = "Already locked by you."
     else:
         text = "Nothing to lock. New files need no lock."
-    host.message("Lore - Lock Outputs", _with_notes(text, notes))
+    host.message("Lore - Lock Outputs", with_notes(text, notes))
 
 
 @_reported
@@ -332,74 +315,17 @@ def discard_parm_file(parm: Any) -> None:
         _discard_files(session, [file], "")
 
 
-def list_paths(paths: Sequence[str]) -> str:
-    """Return `paths` as indented lines, capped at a few with a count of the rest."""
-    lines = [f"    {p}" for p in paths[:_LISTED]]
-    if len(paths) > _LISTED:
-        lines.append(f"    and {len(paths) - _LISTED} more")
-    return "\n".join(lines)
-
-
 def warn_outside(scene: references.SceneReferences) -> None:
     """Tell the user which referenced files live outside the working copy."""
     if not scene.outside:
         return
-    where = list_paths([f"{where}: {file}" for where, file in scene.outside])
-    host.message(
-        "Lore - References Outside the Repo",
-        "These files are outside the working copy, so other users will not get them:\n"
-        f"{where}\n\nThe scene still commits.",
-    )
+    host.message("Lore - References Outside the Repo", outside_text(scene.outside))
 
 
 def _has_local_edits(session: Session, file: str) -> bool:
     status = host.run(session.lore.check_dirty, [Path(file)], title="Checking the scene")
     key = path_key(_rel(session, file))
     return any(path_key(change.path) == key for change in (*status.staged, *status.unstaged))
-
-
-def _scene_behind_text(report: BehindReport, edited: bool) -> str:
-    parts = [
-        (
-            "The open scene is behind the server: a newer revision of it was pushed. "
-            "Saving and committing this copy would overwrite that version."
-        )
-    ]
-    if report.behind:
-        parts.append(f"These references are also behind:\n{list_paths(report.behind)}")
-    if edited:
-        parts.append(
-            "This scene has local changes, so it cannot be synced. "
-            "Continue syncs only the references."
-        )
-    else:
-        parts.append(
-            "Continue syncs only the references. "
-            "Sync and reopen also syncs the scene and reopens it."
-        )
-    parts.append(
-        "After Continue, Lore counts this scene as up to date and you will not be warned again. "
-        "Use Discard changes to get the server version."
-    )
-    return "\n\n".join(parts)
-
-
-def _sync_summary(result: SyncResult, scene_skipped: bool) -> str:
-    parts = [
-        f"Synced {len(result.synced)} file(s):\n{list_paths(result.synced)}"
-        if result.synced
-        else "Nothing was synced."
-    ]
-    if result.skipped:
-        parts.append(
-            f"Skipped:\n{list_paths(result.skipped)}\n"
-            "These have local changes, so Lore left them as they are. Discard changes on a "
-            "file to get the server version. Committing it writes over the newer version "
-            "on the server."
-        )
-    if scene_skipped:
-        parts.append("The scene was not synced or reopened.")
-    return "\n\n".join(parts)
 
 
 def _all_mine(session: Session, paths: list[Path]) -> bool:
@@ -412,11 +338,11 @@ def _collect(session: Session, paths: list[Path], notes: list[str]) -> None:
     if not paths:
         host.message(
             "Lore - Collect Outputs",
-            _with_notes("This scene writes no files inside the working copy.", notes),
+            with_notes("This scene writes no files inside the working copy.", notes),
         )
         return
     result = host.run(session.finish_write, paths, title="Collecting outputs")
-    host.message("Lore - Collect Outputs", _with_notes(describe_write(result), notes))
+    host.message("Lore - Collect Outputs", with_notes(describe_write(result), notes))
 
 
 def _lock_files(session: Session, files: list[str]) -> None:

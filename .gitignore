@@ -7,3 +7,6 @@ dist/
 docs/design/
 .claude/
 CLAUDE.md
+build/
+*.egg-info/
+blender/wheels/

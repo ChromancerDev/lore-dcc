@@ -18,6 +18,7 @@ from lore_dcc.errors import LoreError, NotAWorkingCopy
 from lore_dcc.houdini import host, references
 from lore_dcc.locks import LockState
 from lore_dcc.session import FileState, Session
+from lore_dcc.summaries import behind_offer_text
 
 logger = logging.getLogger(__name__)
 
@@ -178,15 +179,9 @@ def _offer_sync(file: str, report: Any, error: BaseException | None) -> None:
             return
         from lore_dcc.houdini import actions
 
-        parts = []
-        if report.source_behind:
-            parts.append("This scene itself is behind the server.")
-        if report.behind:
-            listed = actions.list_paths(report.behind)
-            parts.append(f"These references are behind the server:\n{listed}")
         choice = host.ask(
             "Lore - Dependencies Behind Server",
-            "\n\n".join(parts),
+            behind_offer_text(report),
             ["Sync Dependencies", "Not now"],
             default="Sync Dependencies",
         )
