@@ -47,13 +47,9 @@ lore.stage(files)   # stages new files, releases locks on unchanged ones
 
 Paths may be absolute or use Houdini variables. Paths outside every working copy are ignored, so the same tool works in and out of Lore projects.
 
-## Load it from your own tools (Blender)
-
-The Blender extension is `blender/` in this repository, or the release zip. `blender/__init__.py` finds the Python code at `LORE_DCC_PYTHON` if that is set, then at `python/` inside the extension (the release zip), then at `../python` (a checkout of this repository). A local extension repository pointed at the repository root loads `blender/` straight from the checkout. Nothing else touches your environment.
-
 ## Call it from scripts (Blender)
 
-`lore_dcc.blender.api` is the supported surface for scripts. It is importable once the extension is enabled.
+`lore_dcc.blender.api` is the supported surface for scripts. The extension ships the `lore_dcc` core as a Python wheel that Blender installs with it, so `import lore_dcc` works in any script once the extension is installed.
 
 **Exporters, bake scripts, batch tools.** Wrap the write with `lock` and `stage`:
 

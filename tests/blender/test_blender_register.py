@@ -91,14 +91,20 @@ def test_manifest_matches_the_package() -> None:
     assert manifest["license"] == ["SPDX:MIT"]
 
 
-def test_extension_shim_finds_the_python_folder(monkeypatch) -> None:
+def test_extension_shim_leaves_sys_path_to_blender() -> None:
     spec = importlib.util.spec_from_file_location("lore_dcc_shim", ROOT / "blender" / "__init__.py")
     assert spec is not None and spec.loader is not None
     shim = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(shim)
     assert callable(shim.register) and callable(shim.unregister)
-    monkeypatch.delenv("LORE_DCC_PYTHON", raising=False)
-    assert Path(shim._python_folder()) == ROOT / "python"
+    assert "sys.path" not in (ROOT / "blender" / "__init__.py").read_text("utf-8")
+
+
+def test_manifest_lists_the_wheel_the_release_builds() -> None:
+    manifest = tomllib.loads((ROOT / "blender" / "blender_manifest.toml").read_text("utf-8"))
+    project = tomllib.loads((ROOT / "pyproject.toml").read_text("utf-8"))["project"]
+    assert project["version"] == __version__
+    assert manifest["wheels"] == [f"./wheels/lore_dcc-{__version__}-py3-none-any.whl"]
 
 
 def test_preferences_read_and_write_the_json_file(registered) -> None:
