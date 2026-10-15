@@ -19,7 +19,11 @@ jobs:
           echo "VERSION=$version" >> "$GITHUB_ENV"
       - name: Build the Houdini zip
         run: |
-          zip -r "lore-dcc-houdini-$VERSION.zip" python houdini docs LICENSE README.md -x '*__pycache__*' '*.pyc'
+          stage=build/houdini
+          mkdir -p "$stage/lore-dcc"
+          cp -r release/houdini/packages "$stage/"
+          cp -r python houdini docs LICENSE README.md "$stage/lore-dcc/"
+          (cd "$stage" && zip -r "$GITHUB_WORKSPACE/lore-dcc-houdini-$VERSION.zip" packages lore-dcc -x '*__pycache__*' '*.pyc')
       - uses: actions/upload-artifact@v4
         with:
           name: houdini
@@ -29,6 +33,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
       - name: Check the tag matches the package and manifest versions
         run: |
           version=$(sed -n 's/^__version__ = "\(.*\)"/\1/p' python/lore_dcc/__init__.py)
@@ -37,13 +44,15 @@ jobs:
           test "$manifest" = "$version" || { echo "manifest $manifest != $version"; exit 1; }
           echo "VERSION=$version" >> "$GITHUB_ENV"
       - name: Build the Blender extension zip
-        # The manifest sits at the zip root and the core under python/, where blender/__init__.py looks first.
+        # The core goes in as the wheel blender_manifest.toml lists; Blender installs it with the extension.
         run: |
-          mkdir -p build/python
-          cp blender/blender_manifest.toml blender/__init__.py LICENSE README.md build/
-          cp -r docs build/
-          cp -r python/lore_dcc build/python/
-          (cd build && zip -r "../lore-dcc-blender-$VERSION.zip" . -x '*__pycache__*' '*.pyc')
+          stage=build/blender
+          mkdir -p "$stage"
+          python -m pip wheel --no-deps -w "$stage/wheels" .
+          test -f "$stage/wheels/lore_dcc-$VERSION-py3-none-any.whl"
+          cp blender/blender_manifest.toml blender/__init__.py LICENSE README.md "$stage/"
+          cp -r docs "$stage/"
+          (cd "$stage" && zip -r "$GITHUB_WORKSPACE/lore-dcc-blender-$VERSION.zip" . -x '*__pycache__*' '*.pyc')
       - uses: actions/upload-artifact@v4
         with:
           name: blender
