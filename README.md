@@ -58,7 +58,7 @@ import lore_dcc.houdini.api as lore; lore.pre_render()
 import lore_dcc.houdini.api as lore; lore.post_render()
 ```
 
-Pre-render locks the tracked files it is about to write. Post-render stages new files and releases the locks on files that came out byte-identical.
+Pre-render locks the tracked files it is about to write. If someone else holds one, it shows a dialog and raises, so the render stops before it writes. Post-render stages new files and releases the locks on files that came out byte-identical.
 
 A script that writes files itself, such as an HDA export button or a Python SOP, does the same with two calls. Paths can be absolute or use variables such as `$HIP`, and paths outside every working copy are ignored. A refused lock shows a dialog and raises, so the script stops before it writes.
 
@@ -69,7 +69,7 @@ lore.lock(["$HIP/export/hero.fbx", "$HIP/tex/hero_albedo.exr"])
 lore.stage(["$HIP/export/hero.fbx", "$HIP/tex/hero_albedo.exr"])
 ```
 
-In Blender, the same calls live in `lore_dcc.blender.api`, and `Properties > Output > Lore` turns on the render hooks per scene. See [integration.md](docs/integration.md#call-it-from-scripts-blender).
+In Blender, the same calls live in `lore_dcc.blender.api`, and `Properties > Output > Lore` turns on the render hooks per scene. Blender ignores errors raised in render handlers, so a refused lock there shows a popup but cannot stop an F12 render; a render script that calls `pre_render()` first does stop. See [integration.md](docs/integration.md#call-it-from-scripts-blender).
 
 ## Per-project settings
 

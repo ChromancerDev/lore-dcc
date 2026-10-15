@@ -32,7 +32,7 @@ import lore_dcc.houdini.api as lore; lore.pre_render()
 import lore_dcc.houdini.api as lore; lore.post_render()
 ```
 
-Pre-render locks the tracked files the node is about to write, for its frame range. Post-render stages new files and releases locks on files that came out byte-identical. In a GUI session a refusal shows a dialog. In hython and batch renders it raises, so the render stops before it writes over a file someone else locked.
+Pre-render locks the tracked files the node is about to write, for its frame range. Post-render stages new files and releases locks on files that came out byte-identical. A refusal raises, after a dialog in a GUI session, so the render stops before it writes over a file someone else locked. A post-render failure shows a dialog in a GUI session and raises only in hython and batch renders.
 
 **Exporters, HDA buttons, Python SOPs.** Wrap the write with `lock` and `stage`:
 
@@ -62,9 +62,9 @@ lore.lock(files)    # raises if someone else holds a lock
 lore.stage(files)   # stages new files, releases locks on unchanged ones
 ```
 
-Paths may be absolute or start with `//`, relative to the open .blend. Paths outside every working copy are ignored. These calls wait for Lore on the calling thread, since a script must not write before its lock is held. In the UI a refusal also shows a popup.
+Paths may be absolute or start with `//`, relative to the open .blend. Paths outside every working copy are ignored. These calls block: they wait on the calling thread until any other Lore call has finished and then until their own has, since a script must not write before its lock is held. Called from Blender's UI thread, Blender freezes for that long. They share one lock with the add-on's own Lore calls, so they never slip into a commit that is running. In the UI a refusal also shows a popup.
 
-**Renders.** `lore.pre_render(scene)` locks the tracked frames and compositor File Output images a render of `scene` will write. `lore.post_render(scene)` stages the new ones and releases locks on the ones that came out byte-identical. Ticking `Lock and collect render outputs` in `Properties > Output > Lore` runs both from Blender's render handlers. A refused lock cannot stop a render that has started: Blender ignores errors in render handlers. In the UI the refusal shows a popup, and in background renders (`blender -b`) it is printed to the console. Run `lore.pre_render()` in your own launcher script before `bpy.ops.render.render()` when a refusal must stop the render.
+**Renders.** `lore.pre_render(scene)` locks the tracked frames and compositor File Output images a render of `scene` will write. `lore.post_render(scene)` stages the new ones and releases locks on the ones that came out byte-identical. Ticking `Lock and collect render outputs` in `Properties > Output > Lore` runs both from Blender's render handlers. A refused `pre_render()` raises, after a popup in the UI. Blender ignores errors raised in render handlers, so the toggle cannot stop an F12 or Ctrl+F12 render that has started: the popup shows (or the console prints it in `blender -b`) and the render goes on. When a refusal must stop the render, call `lore.pre_render()` in your render script before `bpy.ops.render.render()`.
 
 ## Call the core from any Python
 

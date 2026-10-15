@@ -5,10 +5,10 @@ and Post-Render to `from lore_dcc.houdini import api; api.post_render()`.
 A script that writes files itself calls `api.lock(paths)` before writing and
 `api.stage(paths)` after.
 
-For the render helpers, a failure shows a dialog in Houdini's UI and is
-raised in hython and batch renders, so the render stops before it writes over
-a file someone else locked. `lock` and `stage` always raise, after the dialog
-in the UI, so the calling script stops too.
+A refused lock in `pre_render`, `lock` or `stage` always raises, after a
+dialog in Houdini's UI, so the render or the calling script stops before it
+writes over a file someone else locked. `post_render` shows its dialog in the
+UI and raises only in hython and batch renders.
 """
 
 from __future__ import annotations
@@ -41,7 +41,7 @@ def pre_render(node: Any = None) -> tuple[str, ...]:
         The repo-relative paths this call locked.
     """
     node = node if node is not None else hou.pwd()
-    return _node(node, (), lambda s, p: s.prepare_write(p), "Locking outputs")
+    return _node(node, (), lambda s, p: s.prepare_write(p), "Locking outputs", raise_in_ui=True)
 
 
 def post_render(node: Any = None) -> WriteResult | None:
@@ -94,9 +94,22 @@ def stage(paths: Paths) -> WriteResult | None:
     )
 
 
-def _node[T](node: Any, empty: T, step: Callable[[Session, list[Path]], T], title: str) -> T:
+def _node[T](
+    node: Any,
+    empty: T,
+    step: Callable[[Session, list[Path]], T],
+    title: str,
+    *,
+    raise_in_ui: bool = False,
+) -> T:
     return _run(
-        hou.hipFile.path(), lambda s: outputs.outputs_for_node(node, s), empty, step, title, node.path()
+        hou.hipFile.path(),
+        lambda s: outputs.outputs_for_node(node, s),
+        empty,
+        step,
+        title,
+        node.path(),
+        raise_in_ui=raise_in_ui,
     )
 
 
@@ -132,6 +145,8 @@ def _run[T](
     step: Callable[[Session, list[Path]], T],
     title: str,
     where: str,
+    *,
+    raise_in_ui: bool = False,
 ) -> T:
     try:
         if not host.load_prefs().enabled:
@@ -146,4 +161,6 @@ def _run[T](
             raise
         logger.exception("Lore helper failed on %s", where)
         host.error(exc, f"Lore on {where}")
+        if raise_in_ui:
+            raise
         return empty
