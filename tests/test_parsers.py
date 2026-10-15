@@ -471,3 +471,24 @@ def test_status_count_line_with_an_unseen_word_fails_closed() -> None:
 def test_status_scan_count_lines(line: str) -> None:
     text = f"On branch main revision 20 -> {SIG}\nChanges not staged for commit:\nD README.md\n{line}\n"
     assert parsers.parse_status(text).unstaged == (parsers.Change("D", "README.md", False),)
+
+
+STATUS_SERVER_REFUSED = """[Warn] Connection to lore://100.78.241.36:41337 failed
+Repository 01a0bd67f85871c1b216349e457ddc1e
+On branch main revision 8 -> b5c30951c50135402d9fb46e6d836cabcc648ea029a592d081abea36757191aa
+Remote reachable but could not read remote revision (not authorized or unavailable)
+Untracked files:
+A source/tools/test.blend
+"""
+
+
+def test_status_when_the_server_refuses_is_unreachable_not_an_error() -> None:
+    status = parsers.parse_status(STATUS_SERVER_REFUSED)
+    assert status.unreachable
+    assert status.remote_state is parsers.RemoteState.UNREACHABLE
+    assert status.remote_revision is None
+    assert [c.path for c in status.untracked] == ["source/tools/test.blend"]
+
+
+def test_status_in_sync_is_reachable() -> None:
+    assert not parsers.parse_status(STATUS_UNTRACKED).unreachable

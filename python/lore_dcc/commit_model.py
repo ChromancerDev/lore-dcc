@@ -35,6 +35,7 @@ _REMOTE_TEXT = {
     RemoteState.BEHIND: "Behind remote",
     RemoteState.DIVERGED: "Diverged from remote",
     RemoteState.UNKNOWN: "Remote state unknown",
+    RemoteState.UNREACHABLE: "Can't reach the server",
 }
 
 

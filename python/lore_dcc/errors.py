@@ -41,6 +41,20 @@ class LoreCommandError(LoreError):
         self.output = output
 
 
+class ServerUnreachable(LoreCommandError):
+    """Lore could not reach the server, so nothing that needs the server ran."""
+
+    def __init__(self, args_used: list[str], returncode: int | None, output: str) -> None:
+        super().__init__(SERVER_UNREACHABLE_TEXT, args_used, returncode, output)
+
+
+SERVER_UNREACHABLE_TITLE = "Lore - Can't Reach the Server"
+SERVER_UNREACHABLE_TEXT = (
+    "Lore can't reach the server. Check your network or VPN, then try again.\n\n"
+    "Locking, lock checks and commits wait until the server answers."
+)
+
+
 class LockNotAcquired(LoreError):
     """Lore exited cleanly but did not report holding every requested lock.
 

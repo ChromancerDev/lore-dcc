@@ -7,6 +7,7 @@ the process working folder, which inside a DCC is arbitrary.
 from __future__ import annotations
 
 import logging
+import os
 import shutil
 import subprocess
 import sys
@@ -20,6 +21,7 @@ from lore_dcc.errors import (
     LoreCommandError,
     LoreNotFound,
     LoreVersionError,
+    ServerUnreachable,
 )
 from lore_dcc.locks import LockRecord, path_key
 
@@ -32,6 +34,8 @@ BATCH_CHARS = 24_000
 DEFAULT_TIMEOUT = 120.0
 SYNC_TIMEOUT = 3600.0
 ROOTS_ONLY_TAG = "lore-dcc-roots-only"
+DISCONNECTED = "Disconnected from server"
+HOST_CA_VARIABLES = ("SSL_CERT_FILE", "SSL_CERT_DIR")
 
 Runner = Callable[..., subprocess.CompletedProcess]
 
@@ -273,6 +277,9 @@ class LoreCli:
         timeout = timeout or self.timeout
         argv = [self.executable, *(["-P", "--non-interactive"] if global_flags else []), *args]
         kwargs: dict = {}
+        env = child_env()
+        if env is not None:
+            kwargs["env"] = env
         if sys.platform == "win32":
             kwargs["creationflags"] = subprocess.CREATE_NO_WINDOW
         try:
@@ -294,6 +301,8 @@ class LoreCli:
             ) from exc
         if result.returncode != 0:
             output = (result.stdout or "") + (result.stderr or "")
+            if DISCONNECTED in output:
+                raise ServerUnreachable(argv, result.returncode, output)
             raise LoreCommandError(
                 f"lore {' '.join(args[:2])} failed with exit code {result.returncode}",
                 argv,
@@ -301,6 +310,28 @@ class LoreCli:
                 output,
             )
         return result.stdout or ""
+
+
+def child_env(environ: dict[str, str] | None = None, prefix: str | None = None) -> dict[str, str] | None:
+    """Return the environment for `lore`, or None to inherit it unchanged.
+
+    Drops SSL_CERT_FILE and SSL_CERT_DIR when they point inside the host's own
+    Python install, as Blender does with its bundled certifi list. Lore then
+    trusts that list instead of the OS store and rejects a sign-in server
+    whose certificate only the OS store holds.
+    """
+    environ = dict(os.environ if environ is None else environ)
+    root = os.path.normcase(os.path.abspath(prefix or sys.base_prefix)) + os.sep
+    drop = [
+        key
+        for key in HOST_CA_VARIABLES
+        if environ.get(key) and os.path.normcase(os.path.abspath(environ[key])).startswith(root)
+    ]
+    if not drop:
+        return None
+    for key in drop:
+        del environ[key]
+    return environ
 
 
 def _dotted(version: tuple[int, int, int]) -> str:

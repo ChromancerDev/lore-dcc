@@ -15,6 +15,7 @@ import bpy
 
 from lore_dcc.blender import flow, host
 from lore_dcc.blender.flow import Ask, Error, Message
+from lore_dcc.errors import SERVER_UNREACHABLE_TITLE, ServerUnreachable
 from lore_dcc.ui import window_title
 
 DISMISS = frozenset({"Cancel", "Not now", "Close"})
@@ -45,6 +46,8 @@ def layout_of(request: Ask | Message | Error) -> tuple[str, str, list[str], bool
     when the default is a dismiss word.
     """
     if isinstance(request, Error):
+        if isinstance(request.error, ServerUnreachable):
+            return SERVER_UNREACHABLE_TITLE, "OK", [], False
         return "Lore - Error", "OK", [], False
     if isinstance(request, Message):
         return window_title(request.title), "OK", [], False
