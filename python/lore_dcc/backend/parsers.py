@@ -18,8 +18,8 @@ _REPOSITORY = re.compile(r"^Repository (?P<id>[0-9a-f]+)$")
 _ON_BRANCH = re.compile(r"^On branch (?P<branch>\S+) revision (?P<rev>\d+) -> (?P<sig>[0-9a-f]+)$")
 _REMOTE_REVISION = re.compile(r"^Remote revision (?P<rev>\d+) -> (?P<sig>[0-9a-f]+)$")
 _CHANGE = re.compile(r"^(?P<code>[MAD]) (?P<path>.+)$")
-# `status --check-dirty` on new files ends with a count; only "added" has been captured.
-_TRACKED_COUNT = re.compile(r"^Tracked changes: \d+ added$")
+# `status --check-dirty` and `--scan` end with counts; only "added" and "deleted" have been captured.
+_TRACKED_COUNT = re.compile(r"^Tracked changes: \d+ (added|deleted)(, \d+ (added|deleted))*$")
 _LOCK = re.compile(r"^(?P<path>.+) by (?P<owner>.+?) on branch (?P<branch>\S+)$")
 _BRANCH = re.compile(r"^Branch (?P<name>\S.*)$")
 _COMMITTED_REVISION = re.compile(r"^Revision\s*:\s*(?P<rev>\d+)$")

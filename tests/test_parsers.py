@@ -463,3 +463,11 @@ def test_status_count_line_with_an_unseen_word_fails_closed() -> None:
     text = f"On branch main revision 2 -> {SIG}\nTracked changes: 1 renamed\n"
     with pytest.raises(LoreOutputError):
         parsers.parse_status(text)
+
+
+@pytest.mark.parametrize(
+    "line", ["Tracked changes: 8 deleted", "Tracked changes: 6 added, 9 deleted"]
+)
+def test_status_scan_count_lines(line: str) -> None:
+    text = f"On branch main revision 20 -> {SIG}\nChanges not staged for commit:\nD README.md\n{line}\n"
+    assert parsers.parse_status(text).unstaged == (parsers.Change("D", "README.md", False),)
