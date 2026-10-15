@@ -40,6 +40,7 @@ from lore_dcc.summaries import (
 logger = logging.getLogger(__name__)
 
 TITLE = "Lore"
+REVERT = Invoke("wm.revert_mainfile", {}, mode="EXEC_DEFAULT")
 BACKUP = re.compile(r"\.blend\d+$", re.IGNORECASE)
 
 Sub = Generator[Any, Any, Any]
@@ -194,7 +195,8 @@ def discard() -> Sub:
     if not (file and session):
         return
     if (yield from _discard_files(session, [file], "Unsaved changes in this session are lost.")):
-        yield from _reopen(file, "Lore - Discard Changes")
+        problem = _reopen_problem(file)
+        yield Message("Lore - Discard Changes", problem) if problem else REVERT
 
 
 @reported
@@ -218,7 +220,8 @@ def discard_files(files: Sequence[str]) -> Sub:
     if not (yield from _discard_files(session, files, warning)):
         return
     if blend:
-        yield from _reopen(next(f for f in files if _is_blend(f)), "Lore - Discard Changes")
+        problem = _reopen_problem(next(f for f in files if _is_blend(f)))
+        yield Message("Lore - Discard Changes", problem) if problem else REVERT
         return
     text = _reload_text(references.reload(files))
     if text:
@@ -321,7 +324,8 @@ def sync_dependencies(confirm: bool = True) -> Sub:
             text = f"{text}\n\n{reload_text}"
     yield Message("Lore - Sync Dependencies", text)
     if reopened:
-        yield from _reopen(file, "Lore - Sync Dependencies", clean_at_check=clean_at_check)
+        problem = _reopen_problem(file, clean_at_check=clean_at_check)
+        yield Message("Lore - Sync Dependencies", problem) if problem else REVERT
 
 
 @reported
@@ -416,28 +420,24 @@ def _changed_text(file: str) -> str:
     )
 
 
-def _reopen(file: str, title: str, *, clean_at_check: bool = False) -> Sub:
-    """Reopen `file` from disk, unless another file is open now or it gained unsaved edits.
+def _reopen_problem(file: str, *, clean_at_check: bool = False) -> str:
+    """Return why `file` must not be reopened from disk now, or an empty string when it may.
 
-    `clean_at_check` says the scene had no unsaved changes when Lore checked
-    it; edits made after that are never thrown away.
+    It must not when another file is open now, or when it was edited after
+    Lore checked it: `clean_at_check` says it had no unsaved changes then.
     """
     name = Path(file).name
     if not _is_blend(file):
-        yield Message(
-            title,
+        return (
             f"Another file is open now, so {name} was not reopened. "
-            f"Open {name} again to see the version on disk.",
+            f"Open {name} again to see the version on disk."
         )
-        return
     if clean_at_check and bpy.data.is_dirty:
-        yield Message(
-            title,
+        return (
             f"{name} was edited while Lore was busy, so it was not reopened. Saving it now "
-            "writes over the version on disk. Use File > Revert to load that version instead.",
+            "writes over the version on disk. Use File > Revert to load that version instead."
         )
-        return
-    yield Invoke("wm.revert_mainfile", {}, mode="EXEC_DEFAULT")
+    return ""
 
 
 def _reload_text(result: references.Reloaded) -> str:
