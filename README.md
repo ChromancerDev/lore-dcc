@@ -1,6 +1,6 @@
 # lore-dcc
 
-Lore version control inside DCC applications, in the spirit of SideFX Labs `P4Houdini`. Lock, stage, commit and push from inside the app, with Lore's own words and rules.
+Provides hooks into Lore version control inside DCC applications, in the spirit of SideFX Labs `P4Houdini`. Lock, stage, commit and push from inside Houdini, Blender, Substance, and more.
 
 **Status:** first release, 0.1.0, for Houdini 22. Blender 5.2 support is new. Tested on Windows. The code is portable, but Linux is untested.
 
@@ -8,13 +8,13 @@ Found a bug? Use `Lore > File a Bug` in Houdini or Blender, or [open an issue](h
 
 ## Disclaimer
 
-Lore is a pre-1.0 version control system developed and maintained by Epic Games. This plugin is also pre-1.0. Both can change in ways that break existing workflows, and either can have bugs that lose work.
+Lore is a pre-1.0 version control system developed and maintained by Epic Games. This plugin is also pre-1.0. Both can change in ways that break existing workflows, and either can have bugs that result in lost work or potentially corrupted files.
 
-Use this software at your own risk. The authors are not responsible for lost files, errors or any other issues that come from using it. Keep backups of anything you cannot afford to lose. The [MIT License](LICENSE) provides this software "as is", without warranty of any kind.
+In downloading and installing Lore-DCC, you agree that you are using this software at your own risk. The authors are not responsible for lost files, errors or any other issues that come from using it. Keep backups of anything you cannot afford to lose. The [MIT License](LICENSE) provides this software "as is", without warranty of any kind.
 
 ## Requirements
 
-- Houdini 22, or Blender 5.2
+- Houdini 22 or Blender 5.2
 - Lore 0.9.0 or newer, with `lore` on `PATH`
 - A Lore working copy. The plugin finds it by walking up from the open file to `.lore/`. It reads the remote and identity from `.lore/config.toml` and needs no other setup.
 
