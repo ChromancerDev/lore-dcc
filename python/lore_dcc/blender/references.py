@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import os
 from collections.abc import Iterable, Iterator, Sequence
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -96,22 +97,39 @@ def _key(path: Path | str) -> str:
     return os.path.normcase(os.path.realpath(path))
 
 
-def reload(paths: Sequence[Path | str]) -> list[str]:
+@dataclass(frozen=True)
+class Reloaded:
+    """What `reload` could not do.
+
+    Attributes:
+        stale: Labels of data-blocks Blender cannot reload while the file is
+            open, such as sounds, movie clips and fonts.
+        unsaved: Labels of images with unsaved paint, left as they are so the
+            painted pixels survive.
+    """
+
+    stale: tuple[str, ...] = ()
+    unsaved: tuple[str, ...] = ()
+
+
+def reload(paths: Sequence[Path | str]) -> Reloaded:
     """Make Blender re-read files a sync just updated, without reloading the .blend.
 
     Libraries and images reload; cache files and volumes re-read their path.
-    Returns the labels of data-blocks Blender cannot reload while the file is
-    open, such as sounds, movie clips and fonts.
+    An image with unsaved paint is never reloaded.
     """
     wanted = {_key(p) for p in paths}
     stale: list[str] = []
+    unsaved: list[str] = []
     for label, block, files in list(blocks()):
         if not any(_key(f) in wanted for f in files):
             continue
-        if hasattr(block, "reload"):
+        if getattr(block, "is_dirty", False):
+            unsaved.append(label)
+        elif hasattr(block, "reload"):
             block.reload()
         elif block.bl_rna.identifier in ("CacheFile", "Volume"):
             block.filepath = block.filepath
         else:
             stale.append(label)
-    return stale
+    return Reloaded(tuple(stale), tuple(unsaved))

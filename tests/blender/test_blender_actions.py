@@ -9,13 +9,15 @@ import bpy
 import pytest
 from lore_dcc.backend.parsers import Status
 from lore_dcc.blender import actions, flow, hooks, host, outputs, references
-from lore_dcc.blender.flow import Error, InlineRunner
+from lore_dcc.blender.flow import Error, InlineRunner, Run
 from lore_dcc.commit_model import CommitRow
 from lore_dcc.errors import NotAWorkingCopy
 from lore_dcc.locks import LockState
 from lore_dcc.references import SceneReferences
 from lore_dcc.session import BehindReport, CommitResult, FileState, SyncResult, WriteResult
 from lore_dcc.ui import TITLE_PREFIX
+
+REAL_RELOAD = references.reload
 
 
 class FakeSession:
@@ -41,6 +43,7 @@ class FakeSession:
                 raise value
             return value
 
+        record.__name__ = name
         return record
 
     def names(self) -> list[str]:
@@ -59,14 +62,18 @@ def env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
         scene=SceneReferences((tmp_path / "tex" / "a.png",), ()),
         reloaded=[],
         stale=[],
+        unsaved=[],
     )
     monkeypatch.setattr(bpy.data, "filepath", str(blend))
-    monkeypatch.setattr(host, "session_for", lambda path: session)
+    def session_for(path):
+        return session
+
+    monkeypatch.setattr(host, "session_for", session_for)
     monkeypatch.setattr(references, "scan", lambda root: state.scene)
 
     def reload(paths):
         state.reloaded.append([str(p) for p in paths])
-        return state.stale
+        return references.Reloaded(tuple(state.stale), tuple(state.unsaved))
 
     monkeypatch.setattr(references, "reload", reload)
     monkeypatch.setattr(bpy.context, "scene", SimpleNamespace(name="Scene"), raising=False)
@@ -206,8 +213,8 @@ def test_sync_and_reopen_syncs_the_blend_and_reverts(env) -> None:
     assert ("sync_references", ["shot.blend"]) in env.session.calls
     assert kinds(shown) == [
         ("Ask", "Lore - Scene Behind Server"),
-        ("Invoke", "wm.revert_mainfile"),
         ("Message", "Lore - Sync Dependencies"),
+        ("Invoke", "wm.revert_mainfile"),
     ]
     assert env.reloaded == []
 
@@ -364,3 +371,85 @@ def test_handlers_start_flows_only_when_enabled(env, monkeypatch) -> None:
     hooks.on_save_post(env.blend, None)
     assert len(started) == 1
 
+
+
+# Review fixes: each test failed before its fix.
+
+
+class SwitchingRunner(InlineRunner):
+    """Runs Lore calls inline and opens another file right after the call named `switch_on`."""
+
+    def __init__(self, switch_on: str, other: str, answers=(), dirty: bool = False) -> None:
+        super().__init__(answers)
+        self.switch_on, self.other, self.dirty = switch_on, other, dirty
+        self.runs: list[str] = []
+
+    def perform(self, flow_, request) -> None:
+        if isinstance(request, Run):
+            name = getattr(request.fn, "__name__", "")
+            self.runs.append(name)
+            if name == self.switch_on:
+                if self.other:
+                    bpy.data.filepath = self.other
+                bpy.data.is_dirty = self.dirty
+        super().perform(flow_, request)
+
+
+def _run_switching(action, switch_on, other="", answers=(), dirty=False):
+    runner = SwitchingRunner(switch_on, other, answers, dirty)
+    flow.start(action, runner)
+    return runner
+
+
+def test_discard_does_not_revert_a_file_opened_while_lore_ran(env, tmp_path) -> None:
+    runner = _run_switching(
+        actions.discard(), "discard", str(tmp_path / "other.blend"), ["Discard changes"]
+    )
+    assert "Invoke" not in [type(r).__name__ for r in runner.shown]
+    assert "was not reopened" in runner.shown[-1].text
+
+
+def test_sync_and_reopen_skips_the_revert_after_new_edits(env) -> None:
+    env.session.returns["behind"] = BehindReport(True, ())
+    env.session.returns["sync_references"] = SyncResult(("shot.blend",), ())
+    runner = _run_switching(
+        actions.sync_dependencies(), "sync_references", answers=["Sync and reopen"], dirty=True
+    )
+    assert "Invoke" not in [type(r).__name__ for r in runner.shown]
+    assert "edited while Lore was busy" in runner.shown[-1].text
+
+
+def test_sync_never_reloads_an_image_with_unsaved_paint(env, monkeypatch, tmp_path) -> None:
+    image = SimpleNamespace(
+        name="albedo", filepath=str(tmp_path / "tex/a.png"), packed_file=None, source="FILE",
+        library=None, is_dirty=True, reloaded=0,
+    )
+    image.reload = lambda: setattr(image, "reloaded", image.reloaded + 1)
+    monkeypatch.setattr(references, "reload", REAL_RELOAD)
+    monkeypatch.setattr(references, "blocks", lambda: [("Image albedo", image, [image.filepath])])
+    env.session.returns["behind"] = BehindReport(False, ("tex/a.png",))
+    env.session.returns["sync_references"] = SyncResult(("tex/a.png",), ())
+    shown = env.run(actions.sync_dependencies(), answers=["Sync"])
+    assert image.reloaded == 0
+    assert "unsaved paint" in shown[-1].text and "Image albedo" in shown[-1].text
+
+
+def test_lore_calls_from_flows_stay_off_the_timer_thread(env) -> None:
+    runner = _run_switching(hooks.after_load(env.blend), "never")
+    assert {"invalidate", "set_references"} <= set(runner.runs)
+    runner = _run_switching(actions.commit(), "never")
+    assert "set_references" in runner.runs
+
+
+def test_after_load_stores_nothing_once_another_file_is_open(env, tmp_path) -> None:
+    runner = _run_switching(hooks.after_load(env.blend), "session_for", str(tmp_path / "b.blend"))
+    assert "set_references" not in runner.runs
+    assert "behind" not in runner.runs
+
+
+def test_sync_and_commit_stop_when_another_file_was_opened(env, tmp_path) -> None:
+    for action in (actions.sync_dependencies(), actions.commit()):
+        bpy.data.filepath = env.blend
+        runner = _run_switching(action, "session_for", str(tmp_path / "b.blend"))
+        assert "set_references" not in runner.runs
+        assert "Another file was opened" in runner.shown[-1].text

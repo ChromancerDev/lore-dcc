@@ -4,6 +4,10 @@ Lore calls run on one worker thread in call order. A timer on Blender's main
 thread delivers their results and opens popups one at a time, so a flow never
 blocks the UI. Background Blender (`blender -b`) runs everything inline and
 logs instead of asking.
+
+Every Lore call in the process, from the worker, the script API or the render
+handlers, runs under one lock (`serial`), so one operation's read-stage-commit
+never interleaves with another's staging.
 """
 
 from __future__ import annotations
@@ -31,6 +35,17 @@ logger = logging.getLogger(__name__)
 
 _IDLE_INTERVAL = 0.25
 _BUSY_INTERVAL = 0.05
+
+_LORE_LOCK = threading.RLock()
+
+
+def serial[T](fn: Callable[..., T], *args: Any) -> T:
+    """Run a Lore call under the process-wide Lore lock and return its result.
+
+    Waits while any other Lore call runs, then runs `fn` on the calling thread.
+    """
+    with _LORE_LOCK:
+        return fn(*args)
 
 
 def has_ui() -> bool:
@@ -90,10 +105,14 @@ class BlenderRunner:
         self.busy: str = ""
         self._pending = 0
         self._tokens = itertools.count(1)
+        self._stopped = False
         self._worker = threading.Thread(target=self._work, name="lore-dcc-worker", daemon=True)
         self._worker.start()
 
     def perform(self, flow_: Flow, request: Request) -> None:
+        if self._stopped:
+            flow_.close()
+            return
         if isinstance(request, Run):
             self._pending += 1
             self.busy = request.title
@@ -117,14 +136,43 @@ class BlenderRunner:
 
     def _work(self) -> None:
         while True:
-            flow_, request = self._jobs.get()
+            item = self._jobs.get()
+            if item is None or self._stopped:
+                return
+            flow_, request = item
             try:
-                self._done.put((flow_, request.fn(*request.args), None))
+                self._done.put((flow_, serial(request.fn, *request.args), None))
             except BaseException as exc:  # noqa: BLE001 - handed back to the flow
                 self._done.put((flow_, None, exc))
 
+    def stop(self) -> None:
+        """Stop the worker after its current call and drop every queued call, popup and flow.
+
+        A Lore call already running finishes, since a subprocess cannot be
+        recalled; its result is dropped.
+        """
+        self._stopped = True
+        flows: list[Flow] = []
+        for source in (self._jobs, self._done):
+            while True:
+                try:
+                    item = source.get_nowait()
+                except queue.Empty:
+                    break
+                if item is not None:
+                    flows.append(item[0])
+        flows += [flow_ for flow_, _request in self._ui]
+        self._ui.clear()
+        self._prompts.clear()
+        self.current = None
+        self._jobs.put(None)
+        for flow_ in flows:
+            flow_.close()
+
     def tick(self) -> float:
         """Deliver finished Lore calls and open the next popup. Runs on the main thread."""
+        if self._stopped:
+            return _IDLE_INTERVAL
         while True:
             try:
                 flow_, value, error = self._done.get_nowait()
@@ -161,8 +209,18 @@ def runner() -> BlenderRunner | InlineRunner:
     """Return the session's runner, creating it on first use."""
     global _runner
     if _runner is None:
-        _runner = BlenderRunner() if has_ui() else InlineRunner()
+        _runner = BlenderRunner() if has_ui() else InlineRunner(call=serial)
     return _runner
+
+
+def shutdown() -> None:
+    """Stop the runner and forget it, so the next register starts clean."""
+    global _runner, _busy_shown
+    current, _runner = _runner, None
+    if isinstance(current, BlenderRunner):
+        current.stop()
+        _show_busy("")
+    _busy_shown = ""
 
 
 def start(action: Flow) -> None:

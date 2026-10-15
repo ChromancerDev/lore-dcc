@@ -244,3 +244,29 @@ def test_commit_rows_header_toggles_its_group() -> None:
     commit_ui._row_checked(rows[1], context)
     assert rows[0].checked is False
     assert commit_ui.checked_paths(rows) == ["Mine"]
+
+
+def test_refused_pre_render_raises_after_the_popup_in_the_ui(monkeypatch, tmp_path) -> None:
+    from lore_dcc.errors import LockNotAcquired
+
+    repo = tmp_path / "repo"
+    (repo / ".lore").mkdir(parents=True)
+    monkeypatch.setattr(bpy.data, "filepath", str(repo / "shot.blend"))
+
+    def refuse(paths):
+        raise LockNotAcquired(["render/f_0001.png"], "render/f_0001.png locked by sam")
+
+    session = SimpleNamespace(
+        workspace=SimpleNamespace(root=repo.resolve()), prepare_write=refuse, finish_write=refuse
+    )
+    monkeypatch.setattr(host, "session_for", lambda path: session)
+    monkeypatch.setattr(host, "has_ui", lambda: True)
+    monkeypatch.setattr(outputs, "render_outputs", lambda scene, root: [repo / "render/f.png"])
+    shown: list[object] = []
+    monkeypatch.setattr(host, "notify", shown.append)
+    scene = SimpleNamespace(name="Scene")
+    with pytest.raises(LockNotAcquired):
+        api.pre_render(scene)
+    assert len(shown) == 1
+    assert api.post_render(scene) is None
+    assert len(shown) == 2

@@ -6,9 +6,17 @@ same for a render's frames and File Output images; the add-on runs them from
 the render handlers when the scene's "Lock and collect render outputs" box
 is on.
 
-These calls wait for Lore on the calling thread, since a script must not
-write before its lock is held. `lock` and `stage` raise on failure, after a
-popup in the UI, so the calling script stops too.
+These calls block: they wait on the calling thread until any other Lore
+call has finished and then until their own has, since a script must not write
+before its lock is held. Called from Blender's UI thread, the UI freezes for
+that long. They share one lock with the add-on's own Lore calls, so they
+never interleave with a commit.
+
+`lock`, `stage` and `pre_render` raise on failure, after a popup in the UI,
+so the calling script stops before it writes. Blender ignores errors raised in
+render handlers, so the render toggle cannot stop an F12 render that has
+already started; a script that must not render over a refused lock calls
+`pre_render()` itself before `bpy.ops.render.render()`.
 """
 
 from __future__ import annotations
@@ -78,9 +86,14 @@ def pre_render(scene: Any = None) -> tuple[str, ...]:
 
     Returns:
         The repo-relative paths this call locked.
+
+    Raises:
+        LoreError: A lock was refused or Lore failed, after a popup in the UI.
     """
     scene = scene if scene is not None else bpy.context.scene
-    return _render(scene, (), lambda s, p: s.prepare_write(p), "Locking render outputs")
+    return _render(
+        scene, (), lambda s, p: s.prepare_write(p), "Locking render outputs", raise_in_ui=True
+    )
 
 
 def post_render(scene: Any = None) -> WriteResult | None:
@@ -111,9 +124,9 @@ def _files[T](paths: Paths, step: Callable[[Session, list[Path]], T], title: str
                 continue
         results = []
         for files in groups.values():
-            session = host.session_for(files[0])
+            session = host.serial(host.session_for, files[0])
             found = outputs.inside(files, session.workspace.root)
-            results.append(step(session, found))
+            results.append(host.serial(step, session, found))
         return results
     except Exception as exc:
         if host.has_ui():
@@ -122,18 +135,27 @@ def _files[T](paths: Paths, step: Callable[[Session, list[Path]], T], title: str
         raise
 
 
-def _render[T](scene: Any, empty: T, step: Callable[[Session, list[Path]], T], title: str) -> T:
+def _render[T](
+    scene: Any,
+    empty: T,
+    step: Callable[[Session, list[Path]], T],
+    title: str,
+    *,
+    raise_in_ui: bool = False,
+) -> T:
     try:
         if not host.load_prefs().enabled or not bpy.data.filepath:
             return empty
-        session = host.session_for(bpy.data.filepath)
+        session = host.serial(host.session_for, bpy.data.filepath)
         paths = outputs.render_outputs(scene, session.workspace.root)
-        return step(session, paths) if paths else empty
+        return host.serial(step, session, paths) if paths else empty
     except NotAWorkingCopy:
         return empty
     except Exception as exc:
         if not host.has_ui():
             raise
         logger.exception("Lore render helper failed on scene %s", scene.name)
-        host.notify(Error(exc, f"Lore on scene {scene.name}"))
+        host.notify(Error(exc, f"{title} for scene {scene.name}"))
+        if raise_in_ui:
+            raise
         return empty

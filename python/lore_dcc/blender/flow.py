@@ -124,14 +124,19 @@ class InlineRunner:
         shown: Every Ask, Message, Error and Invoke the flow made.
     """
 
-    def __init__(self, answers: Sequence[str | None] = ()) -> None:
+    def __init__(
+        self,
+        answers: Sequence[str | None] = (),
+        call: Callable[..., Any] = lambda fn, *args: fn(*args),
+    ) -> None:
         self.answers = list(answers)
         self.shown: list[Request] = []
+        self._call = call
 
     def perform(self, flow: Flow, request: Request) -> None:
         if isinstance(request, Run):
             try:
-                value = request.fn(*request.args)
+                value = self._call(request.fn, *request.args)
             except Exception as exc:  # noqa: BLE001 - handed to the flow
                 step(flow, self, None, exc)
                 return

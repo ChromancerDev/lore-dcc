@@ -39,6 +39,7 @@ def register(package: str) -> None:
 def unregister() -> None:
     """Undo register. Safe after a partial register."""
     host.remove_timer()
+    host.shutdown()
     hooks.remove()
     for menu, draw in operators.MENU_HOOKS:
         menu_type = getattr(bpy.types, menu, None)

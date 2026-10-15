@@ -194,7 +194,7 @@ def discard() -> Sub:
     if not (file and session):
         return
     if (yield from _discard_files(session, [file], "Unsaved changes in this session are lost.")):
-        yield Invoke("wm.revert_mainfile", {}, mode="EXEC_DEFAULT")
+        yield from _reopen(file, "Lore - Discard Changes")
 
 
 @reported
@@ -218,11 +218,11 @@ def discard_files(files: Sequence[str]) -> Sub:
     if not (yield from _discard_files(session, files, warning)):
         return
     if blend:
-        yield Invoke("wm.revert_mainfile", {}, mode="EXEC_DEFAULT")
+        yield from _reopen(next(f for f in files if _is_blend(f)), "Lore - Discard Changes")
         return
-    stale = references.reload(files)
-    if stale:
-        yield Message("Lore - Discard Changes", _stale_text(stale))
+    text = _reload_text(references.reload(files))
+    if text:
+        yield Message("Lore - Discard Changes", text)
 
 
 @reported
@@ -266,9 +266,13 @@ def sync_dependencies(confirm: bool = True) -> Sub:
     session = (yield from _session(file)) if file else None
     if not (file and session):
         return
+    if not _is_blend(file):
+        yield Message("Lore - Sync Dependencies", _changed_text(file))
+        return
     scene = references.scan(session.workspace.root)
-    session.set_references(file, scene.inside)
+    yield Run(session.set_references, file, scene.inside, title="Reading references")
     report = yield Run(session.behind, file, title="Checking the server")
+    clean_at_check = not bpy.data.is_dirty
     if not (report.behind or report.source_behind):
         yield Message("Lore - Sync Dependencies", "Every reference is up to date with the server.")
         return
@@ -310,13 +314,14 @@ def sync_dependencies(confirm: bool = True) -> Sub:
     result = yield Run(session.sync_references, roots, title="Syncing")
     others = [session.workspace.root / p for p in result.synced if path_key(p) != blend_key]
     reopened = reopen and any(path_key(p) == blend_key for p in result.synced)
-    stale = references.reload(others) if others and not reopened else []
     text = sync_summary(result, reopen and not reopened)
-    if stale:
-        text = f"{text}\n\n{_stale_text(stale)}"
-    if reopened:
-        yield Invoke("wm.revert_mainfile", {}, mode="EXEC_DEFAULT")
+    if others and not reopened and _is_blend(file):
+        reload_text = _reload_text(references.reload(others))
+        if reload_text:
+            text = f"{text}\n\n{reload_text}"
     yield Message("Lore - Sync Dependencies", text)
+    if reopened:
+        yield from _reopen(file, "Lore - Sync Dependencies", clean_at_check=clean_at_check)
 
 
 @reported
@@ -329,9 +334,12 @@ def commit() -> Sub:
     session = yield from _session(file)
     if not session:
         return
+    if not _is_blend(file):
+        yield Message("Lore - Commit", _changed_text(file))
+        return
     if os.path.isfile(file):
         scene = references.scan(session.workspace.root)
-        session.set_references(file, scene.inside)
+        yield Run(session.set_references, file, scene.inside, title="Reading references")
         yield from warn_outside(scene)
     status, rows = yield Run(commit_model.load_rows, session, title="Reading changes")
     rows = commit_rows(rows)
@@ -399,6 +407,49 @@ def _existing(files: Sequence[str]) -> Sub:
     if problems:
         yield Message("Lore - File", "\n".join(problems))
     return found if not problems else []
+
+
+def _changed_text(file: str) -> str:
+    return (
+        "Another file was opened while Lore was busy, so nothing was done for "
+        f"{Path(file).name}. Run it again on the file that is open now."
+    )
+
+
+def _reopen(file: str, title: str, *, clean_at_check: bool = False) -> Sub:
+    """Reopen `file` from disk, unless another file is open now or it gained unsaved edits.
+
+    `clean_at_check` says the scene had no unsaved changes when Lore checked
+    it; edits made after that are never thrown away.
+    """
+    name = Path(file).name
+    if not _is_blend(file):
+        yield Message(
+            title,
+            f"Another file is open now, so {name} was not reopened. "
+            f"Open {name} again to see the version on disk.",
+        )
+        return
+    if clean_at_check and bpy.data.is_dirty:
+        yield Message(
+            title,
+            f"{name} was edited while Lore was busy, so it was not reopened. Saving it now "
+            "writes over the version on disk. Use File > Revert to load that version instead.",
+        )
+        return
+    yield Invoke("wm.revert_mainfile", {}, mode="EXEC_DEFAULT")
+
+
+def _reload_text(result: references.Reloaded) -> str:
+    parts = []
+    if result.stale:
+        parts.append(_stale_text(result.stale))
+    if result.unsaved:
+        parts.append(
+            "These images have unsaved paint, so they were not reloaded. Save or discard the "
+            f"paint, then reload them to see the new versions:\n{list_paths(result.unsaved)}"
+        )
+    return "\n\n".join(parts)
 
 
 def _stale_text(labels: Sequence[str]) -> str:

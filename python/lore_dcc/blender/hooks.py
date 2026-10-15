@@ -147,8 +147,7 @@ def after_save(file: str):
     )
     if choice != "Stage":
         return
-    if _file_key(file) == _file_key(bpy.data.filepath):
-        yield from _remember_references(session, file, warn=True)
+    yield from _remember_references(session, file, warn=True)
     try:
         yield Run(session.stage, [file], title="Staging")
     except LoreError as exc:
@@ -158,19 +157,22 @@ def after_save(file: str):
 def after_load(file: str):
     """Forget the cached identity, remember the references, then check them against the server.
 
-    Asks only when something is behind.
+    Asks only when something is behind. Each step first checks that `file` is still the open file, and ends the
+    flow when another file was opened meanwhile, so the new scene's references
+    are never stored under the old file.
     """
     session = yield from _session(file)
-    if session is None:
+    if session is None or not is_open(file):
         return
-    session.invalidate()
-    yield from _remember_references(session, file, warn=False)
+    yield Run(session.invalidate, title="Reading the working copy")
+    if not (yield from _remember_references(session, file, warn=False)):
+        return
     try:
         report = yield Run(session.behind, file, title="Checking the server")
     except LoreError as exc:
         logger.warning("Could not check %s against the server: %s", file, exc)
         return
-    if _file_key(bpy.data.filepath) != _file_key(file):
+    if not is_open(file):
         return
     if not (report.behind or report.source_behind):
         return
@@ -204,16 +206,28 @@ def _state(session: Session, file: str):
 
 
 def _remember_references(session: Session, file: str, *, warn: bool):
+    """Scan the open scene and store its references under `file`.
+
+    Returns False, storing nothing, when `file` is no longer the open file.
+    """
+    if not is_open(file):
+        return False
     try:
         from lore_dcc.blender import references
 
         scene = references.scan(session.workspace.root)
-        session.set_references(file, scene.inside)
     except Exception:
         logger.exception("Lore could not read the references of %s", file)
-        return
+        return True
+    yield Run(session.set_references, file, scene.inside, title="Reading references")
     if warn:
         yield from actions.warn_outside(scene)
+    return True
+
+
+def is_open(file: str) -> bool:
+    """Return True when `file` is the .blend open now."""
+    return bool(file) and _file_key(file) == _file_key(bpy.data.filepath)
 
 
 def _file_key(file: str) -> str:
