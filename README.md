@@ -28,21 +28,37 @@ Sign in with `lore login` in a terminal. The plugin never handles credentials.
 
 ## Using it
 
+### Houdini
+
 | Where | Actions |
 |---|---|
-| `Lore` menu in the main menu bar | Info, Lock, Discard changes, Collect Outputs, Sync Dependencies, Commit, Enable/Disable |
+| `Lore` menu in the main menu bar | Info, Lock, Discard changes, Collect Outputs, Sync Dependencies, Commit, Enable/Disable, File a Bug |
 | `Lore` shelf | Info, Enable/Disable, Lock, Discard changes, Collect Outputs, Sync Dependencies, Commit |
 | Node right-click, `Lore` | Lock and Discard changes on an asset's library file. Lock Outputs and Collect Outputs on ROPs and File Caches. |
 | Parameter right-click, `Lore` | Lock and Discard changes on the file a string parameter names |
 | Saving | Before saving an unlocked tracked file: "Lore - Lock File?". After saving a new file: "Lore - Stage New File?". Saving over a file someone else locked: "Lore - File Locked by Another User", once per file. Turn the prompts off in `lore_dcc_prefs.json` in your Houdini user folder. |
 | After Commit | `Lore - Commit Complete` names the committed revision, the branch it was pushed to and the revision the server is at. |
 | Opening a hip | Checks in the background whether any file the scene reads is newer on the server, and offers `Sync Dependencies` when one is. |
-| Blender: `Lore` menu in the top bar | Info, Lock, Discard changes, Collect Outputs, Sync Dependencies, Commit, Enable/Disable, File a Bug |
-| Blender: file path field right-click | `Lore: Lock` and `Lore: Discard changes` on the file the field names, such as an image, a cache file or a render path |
-| Blender: Outliner right-click | `Lore: Lock` and `Lore: Discard changes` on the files of the selected data-blocks that read files, such as images and cache files, in the `Blender File` view |
-| Blender: `Properties > Output > Lore` | Lock Outputs, Collect Outputs, and `Lock and collect render outputs` to do both around every render |
-| Blender: saving | After saving a tracked file nobody locked: "Lore - Lock File?". After saving a new file: "Lore - Stage New File?". A file someone else locked: "Lore - File Locked by Another User", once per file. Blender cannot wait for an answer before a save, so these come right after it. Turn them off in `Edit > Preferences > Add-ons > Lore`. |
-| Blender: opening a .blend | The same background check as for a hip. |
+
+### Blender
+
+| Where | Actions |
+|---|---|
+| `Lore` menu in the top bar | Info, Lock, Discard changes, Collect Outputs, Sync Dependencies, Commit, Enable/Disable, File a Bug |
+| File path field right-click | `Lore: Lock` and `Lore: Discard changes` on the file the field names, such as an image, a cache file or a render path |
+| Outliner right-click | `Lore: Lock` and `Lore: Discard changes` on the files of the selected data-blocks that read files, such as images and cache files, in the `Blender File` view |
+| `Properties > Output > Lore` | Lock Outputs, Collect Outputs, and `Lock and collect render outputs` to do both around every render |
+| Saving | After saving a tracked file nobody locked: "Lore - Lock File?". After saving a new file: "Lore - Stage New File?". A file someone else locked: "Lore - File Locked by Another User", once per file. Blender cannot wait for an answer before a save, so these come right after it. Turn them off in `Edit > Preferences > Add-ons > Lore`. |
+| After Commit | `Lore - Commit Complete` names the committed revision, the branch it was pushed to and the revision the server is at. |
+| Opening a .blend | Checks in the background whether any file the scene reads is newer on the server, and offers `Sync Dependencies` when one is. |
+
+### Substance Designer
+
+Coming soon.
+
+### Substance Painter
+
+Coming soon.
 
 ## Dependencies
 
