@@ -439,3 +439,27 @@ def test_status_keeps_both_signatures() -> None:
         f"On branch main revision 8 -> {'a' * 64}\nRemote revision 9 -> {'b' * 64}\n"
     )
     assert (status.signature, status.remote_signature) == ("a" * 64, "b" * 64)
+
+
+def test_status_check_dirty_on_new_files_ends_with_a_count() -> None:
+    text = f"""\
+Repository 01a01c890d5c78629798bab981f4d893
+On branch main revision 20 -> {SIG}
+Remote revision 20 -> {SIG}
+Local branch in sync with remote
+Untracked files:
+A ldblender/render/shot_0001.png
+A ldblender/render/shot_0002.png
+Tracked changes: 2 added
+"""
+    status = parsers.parse_status(text)
+    assert [c.path for c in status.untracked] == [
+        "ldblender/render/shot_0001.png",
+        "ldblender/render/shot_0002.png",
+    ]
+
+
+def test_status_count_line_with_an_unseen_word_fails_closed() -> None:
+    text = f"On branch main revision 2 -> {SIG}\nTracked changes: 1 renamed\n"
+    with pytest.raises(LoreOutputError):
+        parsers.parse_status(text)
