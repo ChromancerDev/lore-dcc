@@ -20,6 +20,7 @@ jobs:
           case "$dcc" in
             *houdini*) label=houdini ;;
             *blender*) label=blender ;;
+            *designer*) label=designer ;;
             *) exit 0 ;;
           esac
           gh issue edit "$NUMBER" --repo "$GITHUB_REPOSITORY" --add-label "$label"

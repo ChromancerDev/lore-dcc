@@ -1,0 +1,36 @@
+<svg width="28" height="31" viewBox="0 0 28 31" fill="none" xmlns="http://www.w3.org/2000/svg">
+<g filter="url(#filter0_d_1_38)">
+<path d="M7.36138 13.5C7.0341 13.2125 6.75104 12.943 6.49894 12.6959C4.42465 10.625 3.58874 8.82363 4.19466 7.75C4.80501 6.68086 6.75988 6.51465 9.56394 7.30527L9.79392 7.37266L9.60374 7.51641C8.35209 8.46426 7.6754 9.69062 7.60021 9.83437C7.29947 10.36 7.70194 11.2898 8.70149 12.3904C9.74527 11.5818 10.8775 10.8182 12.0761 10.1174C13.2702 9.4166 14.4909 8.80117 15.7028 8.28906C15.2649 6.86055 14.6723 6.04297 14.0663 6.04297C13.9115 6.04297 12.5316 6.025 11.0986 6.64941L10.8775 6.74375L10.935 6.51016C11.6648 3.63965 12.7837 2 14 2C15.2207 2 16.3352 3.63965 17.065 6.49668C17.1535 6.84258 17.2375 7.22441 17.3215 7.65566C17.7284 7.51641 18.0955 7.39961 18.4361 7.30078C21.2401 6.51016 23.195 6.67188 23.8053 7.74551C24.4157 8.81465 23.5754 10.6205 21.5011 12.6914L21.3286 12.8621L21.2976 12.624C21.1163 11.0518 20.4086 9.84336 20.3246 9.7041C20.0238 9.17852 19.0287 9.06621 17.5913 9.39414C17.7594 10.7193 17.8434 12.0984 17.8434 13.5C17.8434 14.9016 17.7594 16.2807 17.5913 17.6059C19.0331 17.9338 20.0238 17.8215 20.329 17.2914C20.4086 17.1611 21.1163 15.9482 21.2976 14.3805L21.3286 14.1424L21.5011 14.3131C23.5709 16.375 24.4113 18.1764 23.8009 19.2545C23.1906 20.3236 21.2357 20.4898 18.4316 19.6992C18.0911 19.6049 17.7284 19.4881 17.3171 19.3443C17.2331 19.7801 17.149 20.1574 17.0606 20.5033C16.3352 23.3604 15.2163 25 14 25C12.7837 25 11.6648 23.3604 10.935 20.5033L10.8775 20.2697L11.0986 20.3641C12.5316 20.993 13.9115 20.9705 14.0752 20.9705C14.6723 20.9705 15.2649 20.1529 15.7072 18.7244C14.4954 18.2078 13.2747 17.5924 12.0805 16.8961C10.8864 16.1953 9.74969 15.4316 8.70591 14.623C7.70636 15.7236 7.30389 16.6535 7.60464 17.1881C7.67982 17.3273 8.35651 18.5492 9.60374 19.4971L9.79392 19.6408L9.56394 19.7082C6.75988 20.4988 4.80501 20.3371 4.19466 19.2635C3.58432 18.1943 4.42465 16.3885 6.49894 14.3176C6.74661 14.057 7.0341 13.792 7.36138 13.5ZM9.86026 13.5C10.7139 14.2322 11.7355 14.951 12.8191 15.5889C13.9027 16.2223 15.0261 16.7613 16.0787 17.1432C16.2777 16.0246 16.3839 14.7713 16.3839 13.5C16.3839 12.2287 16.2822 10.9709 16.0787 9.85684C15.0261 10.2432 13.9027 10.7777 12.8191 11.4111C11.7355 12.0445 10.7139 12.7678 9.86026 13.5Z" fill="#CCCCCC"/>
+</g>
+<g clip-path="url(#clip0_1_38)">
+<g filter="url(#filter1_d_1_38)">
+<path d="M21 24V18" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" stroke="#21C826"/>
+<path d="M24 21L21 18L18 21" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" stroke="#21C826"/>
+</g>
+</g>
+<defs>
+<filter id="filter0_d_1_38" x="0" y="0" width="28" height="31" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB">
+<feFlood flood-opacity="0" result="BackgroundImageFix"/>
+<feColorMatrix in="SourceAlpha" type="matrix" values="0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 127 0" result="hardAlpha"/>
+<feOffset dy="2"/>
+<feGaussianBlur stdDeviation="2"/>
+<feComposite in2="hardAlpha" operator="out"/>
+<feColorMatrix type="matrix" values="0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0.4 0"/>
+<feBlend mode="normal" in2="BackgroundImageFix" result="effect1_dropShadow_1_38"/>
+<feBlend mode="normal" in="SourceGraphic" in2="effect1_dropShadow_1_38" result="shape"/>
+</filter>
+<filter id="filter1_d_1_38" x="13.15" y="14.15" width="15.7" height="15.7" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB">
+<feFlood flood-opacity="0" result="BackgroundImageFix"/>
+<feColorMatrix in="SourceAlpha" type="matrix" values="0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 127 0" result="hardAlpha"/>
+<feOffset dy="1"/>
+<feGaussianBlur stdDeviation="2"/>
+<feComposite in2="hardAlpha" operator="out"/>
+<feColorMatrix type="matrix" values="0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0.5 0"/>
+<feBlend mode="normal" in2="BackgroundImageFix" result="effect1_dropShadow_1_38"/>
+<feBlend mode="normal" in="SourceGraphic" in2="effect1_dropShadow_1_38" result="shape"/>
+</filter>
+<clipPath id="clip0_1_38">
+<rect width="12" height="12" fill="white" transform="translate(14 15)"/>
+</clipPath>
+</defs>
+</svg>
