@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Callable
+from pathlib import Path
 from typing import Any
 
 from lore_dcc.designer import actions, hooks, host
@@ -11,6 +12,7 @@ from lore_dcc.designer import actions, hooks, host
 logger = logging.getLogger(__name__)
 
 MENU_OBJECT = "lore_dcc_menu"
+ICONS = Path(__file__).resolve().parent / "icons"
 
 # None is a separator.
 MENU: tuple[tuple[str, Callable[[], None]] | None, ...] = (
@@ -25,9 +27,11 @@ MENU: tuple[tuple[str, Callable[[], None]] | None, ...] = (
     ("File a Bug", actions.file_a_bug),
 )
 
-EXPLORER: tuple[tuple[str, str, Callable[[int], None]], ...] = (
+# Label, icon file in ICONS, tooltip, action.
+EXPLORER: tuple[tuple[str, str, str, Callable[[int], None]], ...] = (
     (
         "Lore: Lock",
+        "lock.svg",
         (
             "Lock the selected package or linked resource in Lore, or the current package. "
             "Perforce calls this a checkout."
@@ -36,11 +40,13 @@ EXPLORER: tuple[tuple[str, str, Callable[[int], None]], ...] = (
     ),
     (
         "Lore: Discard changes",
+        "discard.svg",
         "Discard changes to the selected package or linked resource. Perforce calls this a revert.",
         actions.discard_selection,
     ),
     (
         "Lore: Commit",
+        "commit.svg",
         "Commit and push the current package. Perforce calls this a submit.",
         lambda _explorer_id: actions.commit(),
     ),
@@ -103,9 +109,9 @@ def _on_explorer_created(explorer_id: int) -> None:
         from PySide6 import QtGui
 
         ui = host.qt_ui()
-        for label, tip, action in EXPLORER:
-            item = QtGui.QAction(label, ui.getMainWindow())
-            item.setToolTip(tip)
+        for label, icon, tip, action in EXPLORER:
+            item = QtGui.QAction(QtGui.QIcon(str(ICONS / icon)), label, ui.getMainWindow())
+            item.setToolTip(f"{label}\n{tip}")
             item.triggered.connect(lambda *_args, run=action, eid=explorer_id: run(eid))
             _keep.append(item)
             ui.addActionToExplorerToolbar(explorer_id, item)

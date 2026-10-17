@@ -295,3 +295,27 @@ def test_before_save_callback_uses_the_target_path_not_the_previous_one(env) -> 
     hooks.install()
     env.app.callback("before_save")(env.sbs.encode(), b"D:/elsewhere/old.sbs")
     assert env.session.calls == [("file_states", [env.sbs])]
+
+
+def test_every_explorer_button_has_an_icon_that_qt_can_read() -> None:
+    for label, icon, _tip, _action in plugin.EXPLORER:
+        file = plugin.ICONS / icon
+        assert file.is_file(), label
+        assert file.read_text(encoding="utf-8").lstrip().startswith("<svg"), label
+
+
+def test_explorer_buttons_carry_icon_label_and_tooltip(env, monkeypatch) -> None:
+    pytest.importorskip("PySide6")
+    from PySide6 import QtWidgets
+
+    QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
+    added = []
+    monkeypatch.setattr(
+        env.app.ui, "addActionToExplorerToolbar", lambda eid, item: added.append((eid, item)), raising=False
+    )
+    monkeypatch.setattr(env.app.ui, "getMainWindow", lambda: None)
+    plugin._on_explorer_created(5)
+    assert [item.text() for _, item in added] == [label for label, *_ in plugin.EXPLORER]
+    assert all(eid == 5 and not item.icon().isNull() for eid, item in added)
+    assert added[0][1].toolTip().startswith("Lore: Lock\n")
+    plugin._keep.clear()
