@@ -71,3 +71,11 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: gh release create "$GITHUB_REF_NAME" dist/*.zip --title "$GITHUB_REF_NAME" --generate-notes --verify-tag
+      - name: Publish the release branches
+        # One commit per tag on release/<dcc>; its tree is that DCC's zip plus VERSION, for git subtree consumers.
+        env:
+          GIT_AUTHOR_NAME: github-actions[bot]
+          GIT_AUTHOR_EMAIL: 41898283+github-actions[bot]@users.noreply.github.com
+          GIT_COMMITTER_NAME: github-actions[bot]
+          GIT_COMMITTER_EMAIL: 41898283+github-actions[bot]@users.noreply.github.com
+        run: bash .github/scripts/publish-release-branches.sh "${GITHUB_REF_NAME#v}" dist
