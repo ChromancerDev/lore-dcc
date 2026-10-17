@@ -176,11 +176,12 @@ def _selected_files(explorer_id: int) -> list[str]:
 
 
 def _item_file(item: Any) -> str | None:
-    if hasattr(item, "getEmbedMethod"):
-        return references.linked_file(item)
+    """Return a linked resource's file, else the file of the package holding the item."""
     if hasattr(item, "getDependencies"):
         return packages.file_of(item)
-    return None
+    if hasattr(item, "getEmbedMethod") and (file := references.linked_file(item)):
+        return file
+    return packages.file_of(item.getPackage()) if hasattr(item, "getPackage") else None
 
 
 @_reported

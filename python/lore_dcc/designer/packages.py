@@ -13,7 +13,7 @@ from lore_dcc.designer import host
 
 def install_dir() -> Path:
     """Return Designer's install folder, which holds its own library packages."""
-    return Path(sd.__file__).resolve().parents[2]
+    return Path(sd.__file__).resolve().parents[3]
 
 
 def key(path: Path | str) -> str:

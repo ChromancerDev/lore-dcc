@@ -17,6 +17,7 @@ from lore_dcc.errors import LoreError, NotAWorkingCopy
 from lore_dcc.locks import LockState
 from lore_dcc.session import FileState, Session
 from lore_dcc.summaries import behind_offer_text
+from lore_dcc.workspace import find_workspace
 
 logger = logging.getLogger(__name__)
 
@@ -203,7 +204,10 @@ def _offer_sync(file: str, report: Any, error: BaseException | None) -> None:
 
 
 def _session(file: str) -> Session | None:
+    """Return the Session for `file`. The folder walk comes first, so files outside
+    every working copy, such as Designer's own library, never wait on Lore."""
     try:
+        find_workspace(Path(file))
         return host.session_for(file)
     except NotAWorkingCopy:
         return None

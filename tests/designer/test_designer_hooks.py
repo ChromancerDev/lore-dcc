@@ -6,7 +6,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
-from fake_sd import FakePackage, SDResourceBitmap
+from fake_sd import EmbedMethod, FakePackage, SDResourceBitmap
 from lore_dcc.designer import actions, hooks, host, plugin
 from lore_dcc.errors import NotAWorkingCopy
 from lore_dcc.locks import LockState
@@ -46,6 +46,7 @@ class FakeSession:
 def env(app, monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
     root = tmp_path / "work"
     (root / "tex").mkdir(parents=True)
+    (root / ".lore").mkdir()
     sbs = root / "rock.sbs"
     sbs.write_text("x")
     bitmap = root / "tex" / "albedo.png"
@@ -246,3 +247,43 @@ def test_menu_action_runs_its_action(env) -> None:
     enable.slots[0](False)
     assert env.prefs.enabled is False
     plugin.uninitialize()
+
+
+def test_hooks_skip_files_outside_every_working_copy_without_asking_lore(
+    env, monkeypatch, tmp_path
+) -> None:
+    outside = tmp_path / "library" / "blend.sbs"
+    outside.parent.mkdir()
+    outside.write_text("x")
+    asked_lore: list[str] = []
+    monkeypatch.setattr(host, "session_for", asked_lore.append)
+    hooks.before_save(str(outside))
+    hooks.after_save(str(outside))
+    hooks.after_load(str(outside))
+    assert asked_lore == []
+    assert env.asked == []
+
+
+def test_explorer_lock_on_a_graph_locks_its_package(env) -> None:
+    graph = SDResourceBitmap("graph", "", EmbedMethod.Undefined)
+    graph.getPackage = lambda: env.package
+    env.app.ui.selection = [graph]
+    actions.lock_selection(7)
+    assert env.session.calls == [("lock", [env.sbs])]
+
+
+def test_api_lock_and_stage_group_paths_by_working_copy_and_skip_the_rest(env, tmp_path) -> None:
+    from lore_dcc.designer import api
+    from lore_dcc.session import WriteResult
+
+    env.session.returns["prepare_write"] = ("out/rock.sbsar",)
+    env.session.returns["finish_write"] = WriteResult(("out/rock.sbsar",), (), ())
+    inside = str(Path(env.sbs).parent / "out" / "rock.sbsar")
+    outside = str(tmp_path / "elsewhere" / "rock.sbsar")
+    assert api.lock([inside, outside]) == ("out/rock.sbsar",)
+    assert api.stage(inside) == WriteResult(("out/rock.sbsar",), (), ())
+    assert env.session.calls == [
+        ("prepare_write", [Path(inside)]),
+        ("finish_write", [Path(inside)]),
+    ]
+    assert api.lock([outside]) == ()
