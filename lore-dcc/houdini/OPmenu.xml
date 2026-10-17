@@ -1,0 +1,78 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<menuDocument>
+  <menu>
+    <subMenu id="opmenu.lore_menu">
+      <label>Lore</label>
+      <insertAtIndex>48</insertAtIndex>
+      <context>
+        <expression>
+try:
+    from lore_dcc.houdini import actions
+    return int(actions.node_menu_visible(kwargs["node"]))
+except Exception:
+    return 0
+        </expression>
+      </context>
+
+      <scriptItem id="opmenu.lore_lock_hda">
+        <label>Lock</label>
+        <context>
+          <expression>
+try:
+    from lore_dcc.houdini import actions
+    return int(actions.node_has_library(kwargs["node"]))
+except Exception:
+    return 0
+          </expression>
+        </context>
+        <scriptCode><![CDATA[from lore_dcc.houdini import actions
+actions.lock_hda(kwargs["node"])]]></scriptCode>
+      </scriptItem>
+
+      <scriptItem id="opmenu.lore_discard_hda">
+        <label>Discard changes</label>
+        <context>
+          <expression>
+try:
+    from lore_dcc.houdini import actions
+    return int(actions.node_has_library(kwargs["node"]))
+except Exception:
+    return 0
+          </expression>
+        </context>
+        <scriptCode><![CDATA[from lore_dcc.houdini import actions
+actions.discard_hda(kwargs["node"])]]></scriptCode>
+      </scriptItem>
+
+      <scriptItem id="opmenu.lore_lock_outputs">
+        <label>Lock Outputs</label>
+        <context>
+          <expression>
+try:
+    from lore_dcc.houdini import outputs
+    return int(outputs.is_output_node(kwargs["node"]))
+except Exception:
+    return 0
+          </expression>
+        </context>
+        <scriptCode><![CDATA[from lore_dcc.houdini import actions
+actions.lock_node_outputs(kwargs["node"])]]></scriptCode>
+      </scriptItem>
+
+      <scriptItem id="opmenu.lore_collect_outputs">
+        <label>Collect Outputs</label>
+        <context>
+          <expression>
+try:
+    from lore_dcc.houdini import outputs
+    return int(outputs.is_output_node(kwargs["node"]))
+except Exception:
+    return 0
+          </expression>
+        </context>
+        <scriptCode><![CDATA[from lore_dcc.houdini import actions
+actions.collect_node_outputs(kwargs["node"])]]></scriptCode>
+      </scriptItem>
+    </subMenu>
+  </menu>
+</menuDocument>

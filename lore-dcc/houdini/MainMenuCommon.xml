@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mainMenu>
+  <menuBar>
+    <subMenu id="lore_menu">
+      <label>Lore</label>
+      <insertBefore>help_menu</insertBefore>
+
+      <scriptItem id="lore_menu_info">
+        <label>Info</label>
+        <scriptCode><![CDATA[from lore_dcc.houdini import actions; actions.info()]]></scriptCode>
+      </scriptItem>
+
+      <scriptItem id="lore_menu_lock">
+        <label>Lock</label>
+        <scriptCode><![CDATA[from lore_dcc.houdini import actions; actions.lock()]]></scriptCode>
+      </scriptItem>
+
+      <scriptItem id="lore_menu_discard">
+        <label>Discard changes</label>
+        <scriptCode><![CDATA[from lore_dcc.houdini import actions; actions.discard()]]></scriptCode>
+      </scriptItem>
+
+      <scriptItem id="lore_menu_collect_outputs">
+        <label>Collect Outputs</label>
+        <scriptCode><![CDATA[from lore_dcc.houdini import actions; actions.collect_outputs()]]></scriptCode>
+      </scriptItem>
+
+      <scriptItem id="lore_menu_sync_dependencies">
+        <label>Sync Dependencies</label>
+        <scriptCode><![CDATA[from lore_dcc.houdini import actions; actions.sync_dependencies()]]></scriptCode>
+      </scriptItem>
+
+      <scriptItem id="lore_menu_commit">
+        <label>Commit</label>
+        <scriptCode><![CDATA[from lore_dcc.houdini import actions; actions.commit()]]></scriptCode>
+      </scriptItem>
+
+      <separatorItem/>
+
+      <scriptItem id="lore_menu_toggle_enabled">
+        <label>Enable/Disable</label>
+        <scriptCode><![CDATA[from lore_dcc.houdini import actions; actions.toggle_enabled()]]></scriptCode>
+      </scriptItem>
+
+      <separatorItem/>
+
+      <scriptItem id="lore_menu_file_a_bug">
+        <label>File a Bug</label>
+        <scriptCode><![CDATA[from lore_dcc.houdini import actions; actions.file_a_bug()]]></scriptCode>
+      </scriptItem>
+    </subMenu>
+  </menuBar>
+</mainMenu>
