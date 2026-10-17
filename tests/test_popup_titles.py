@@ -14,7 +14,7 @@ TITLED = {"ask", "message", "show_message", "setWindowTitle", "Ask", "Message"}
 # Blender calls that open a popup and take its title as `title=`.
 BLENDER_POPUPS = {"invoke_props_dialog", "invoke_confirm", "popup_menu"}
 # Modules that only forward a caller's title to the UI, where ui.window_title adds the prefix.
-FORWARDERS = {"houdini/host.py", "ui/messages.py", "ui/tasks.py", "blender/dialogs.py"}
+FORWARDERS = {"houdini/host.py", "designer/host.py", "ui/messages.py", "ui/tasks.py", "blender/dialogs.py"}
 
 
 def _calls(path: Path):
