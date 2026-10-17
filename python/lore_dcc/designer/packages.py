@@ -35,10 +35,15 @@ def file_of(package: Any) -> str | None:
     return path or None
 
 
+def current_graph() -> Any:
+    """Return the graph that last had focus in a graph view, or None."""
+    ui = host.app().getUIMgr()
+    return ui.getCurrentGraph() if ui is not None else None
+
+
 def current() -> Any:
     """Return the package of the graph in focus, or None."""
-    ui = host.app().getUIMgr()
-    graph = ui.getCurrentGraph() if ui is not None else None
+    graph = current_graph()
     return graph.getPackage() if graph is not None else None
 
 

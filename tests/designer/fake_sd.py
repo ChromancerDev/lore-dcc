@@ -76,6 +76,9 @@ class FakeGraph:
     def getPackage(self) -> FakePackage:
         return self.package
 
+    def getIdentifier(self) -> str:
+        return "Substance_graph"
+
 
 class FakePackageMgr:
     def __init__(self, app: FakeApp) -> None:

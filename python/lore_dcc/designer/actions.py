@@ -56,13 +56,17 @@ def _session(file: Path | str) -> Session | None:
 
 def _package_file() -> str | None:
     """Return the saved file of the current package, or None after telling the user why."""
-    package = packages.current()
-    if package is None:
+    graph = packages.current_graph()
+    if graph is None:
         host.message("Lore - No Package", "Open a graph of the package first.")
         return None
-    file = packages.file_of(package)
+    file = packages.file_of(graph.getPackage())
     if file is None:
-        host.message("Lore - Save File First", "Save the package first.")
+        host.message(
+            "Lore - Save File First",
+            f"The graph in focus, {graph.getIdentifier()}, is in a package that was never saved. "
+            "Save that package, or click inside a graph of a saved package.",
+        )
     return file
 
 

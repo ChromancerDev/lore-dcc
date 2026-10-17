@@ -167,6 +167,7 @@ def test_actions_need_a_graph_in_focus_and_a_saved_package(env) -> None:
     env.app.current = FakePackage("")
     actions.lock()
     assert env.asked == [("Lore - No Package", []), ("Lore - Save File First", [])]
+    assert "Substance_graph" in env.messages[-1]
     assert env.session.calls == []
 
 
