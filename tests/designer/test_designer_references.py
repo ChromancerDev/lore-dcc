@@ -49,18 +49,25 @@ def test_scan_keeps_dependencies_and_linked_resources_in_the_working_copy(app, t
     assert scene.outside == (("SDResourceBitmap ext", outside),)
 
 
-def test_reload_reloads_clean_open_packages_and_lists_the_rest(app, tmp_path: Path) -> None:
+def test_reload_reloads_open_packages_and_the_packages_that_use_a_synced_one(
+    app, tmp_path: Path
+) -> None:
     clean = FakePackage(str(tmp_path / "clean.sbs"))
     dirty = FakePackage(str(tmp_path / "dirty.sbs"), modified=True)
-    app.packages = [clean, dirty]
+    shared = tmp_path / "shared.sbs"
+    user = FakePackage(str(tmp_path / "user.sbs"), dependencies=[FakeDependency(str(shared))])
+    app.packages = [clean, dirty, user]
     closed = tmp_path / "closed.sbs"
     bitmap = tmp_path / "albedo.png"
+    font = tmp_path / "title.ttf"
     reloaded, pending = references.reload(
-        [Path(clean.file), Path(dirty.file), closed, bitmap]
+        [Path(clean.file), Path(dirty.file), shared, closed, bitmap, font]
     )
-    assert reloaded == [Path(clean.file)]
-    assert pending == [Path(dirty.file), bitmap]
-    assert app.events == [("unload", clean.file), ("load", clean.file)]
+    assert reloaded == [Path(clean.file), Path(user.file)]
+    assert pending == [Path(dirty.file), font]
+    assert app.events == [
+        ("unload", clean.file), ("load", clean.file), ("unload", user.file), ("load", user.file),
+    ]  # fmt: skip
 
 
 def test_reload_with_discard_edits_reloads_a_modified_package(app, tmp_path: Path) -> None:

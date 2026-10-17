@@ -16,6 +16,10 @@ __all__ = ["SceneReferences", "linked_file", "reload", "scan"]
 
 LINKED = ("Linked", "CopiedAndLinked")
 PACKAGE_SUFFIXES = (".sbs", ".sbsar")
+IMAGE_SUFFIXES = (
+    ".png", ".jpg", ".jpeg", ".tga", ".tif", ".tiff", ".exr", ".hdr", ".psd", ".bmp", ".dds",
+    ".webp", ".gif",
+)  # fmt: skip
 
 
 def linked_file(resource: Any) -> str | None:
@@ -53,18 +57,32 @@ def scan(package: Any, root: Path) -> SceneReferences:
 def reload(paths: Sequence[Path]) -> tuple[list[Path], list[Path]]:
     """Make Designer re-read files a sync just updated.
 
-    Open packages without unsaved changes are unloaded and loaded. A package
-    file that is not open needs nothing. Designer has no reload for bitmaps,
-    fonts, SVGs or meshes, and a package with unsaved changes is kept as it is.
+    Designer re-reads a changed linked bitmap on its own. A changed package
+    reloads by unloading and loading the open package that is it or depends
+    on it, which also closes that package's graph views. A package with
+    unsaved changes is kept as it is. Fonts, SVGs and meshes have no reload.
 
     Returns:
-        The reloaded paths, and the paths that need the user to reopen a package.
+        The packages that were reloaded, and the synced paths that need the
+        user to reopen a package.
     """
     reloaded: list[Path] = []
     pending: list[Path] = []
+    done: set[str] = set()
     for path in paths:
-        if packages.reload(path):
-            reloaded.append(path)
-        elif packages.find(path) is not None or path.suffix.lower() not in PACKAGE_SUFFIXES:
+        suffix = path.suffix.lower()
+        if suffix in IMAGE_SUFFIXES:
+            continue
+        if suffix not in PACKAGE_SUFFIXES:
             pending.append(path)
+            continue
+        owners = [path] if packages.find(path) is not None else packages.dependents(path)
+        for owner in owners:
+            if packages.key(owner) in done:
+                continue
+            done.add(packages.key(owner))
+            if packages.reload(owner):
+                reloaded.append(Path(owner))
+            elif path not in pending:
+                pending.append(path)
     return reloaded, pending

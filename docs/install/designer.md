@@ -10,7 +10,8 @@
 
 1. Download `lore-dcc-designer-<version>.zip` from the [Releases page](https://github.com/ChromancerDev/lore-dcc/releases) and unzip it anywhere. It holds `lore_dcc_designer.sdplugin`.
 2. In Designer, open `Tools > Plugin Manager` and click `INSTALL...`. Pick `lore_dcc_designer.sdplugin`. Keep its file name: Designer reads the plugin name from it.
-3. A `Lore` menu appears in the main menu bar.
+3. A `Lore` menu appears in the main menu bar, after `Help`.
+4. Restart Designer. The `Lore: Lock`, `Lore: Discard changes` and `Lore: Commit` buttons on the Explorer toolbar appear only after a restart.
 
 Designer unpacks the plugin into its user plugins folder, `Documents/Adobe/Adobe Substance 3D Designer/python/sduserplugins/lore_dcc_designer` on Windows, and loads it at every start. You can delete the zip and the `.sdplugin` afterwards.
 
@@ -18,7 +19,7 @@ Designer unpacks the plugin into its user plugins folder, `Documents/Adobe/Adobe
 
 - Open a graph of a saved package inside a working copy and choose `Lore > Info`. It shows the working copy, branch, user and remote.
 - On a package outside a working copy it says `Not a Lore working copy`. That is expected.
-- No `Lore` menu: check that `lore_dcc_designer` is listed and ticked in `Tools > Plugin Manager`, then look in `Windows > Console` for `Lore` errors.
+- No `Lore` menu: check that `lore_dcc_designer` is listed and ticked in `Tools > Plugin Manager`, then look for `Lore` errors in Designer's log, `%LOCALAPPDATA%/Adobe/Adobe Substance 3D Designer/16.0/log.txt` on Windows.
 
 ## Settings
 

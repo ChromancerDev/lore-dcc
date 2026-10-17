@@ -58,9 +58,9 @@ def _decode(value: Any) -> str:
     return value.decode("utf-8") if isinstance(value, bytes) else str(value or "")
 
 
-def _on_before_save(first: Any, second: Any) -> None:
+def _on_before_save(target: Any, _previous: Any) -> None:
     try:
-        file = _decode(second) or _decode(first)
+        file = _decode(target)
         if file:
             before_save(file)
     except Exception:

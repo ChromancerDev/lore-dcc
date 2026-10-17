@@ -237,21 +237,29 @@ def sync_dependencies(confirm: bool = True, file: str | None = None) -> None:
     roots = [*report.behind, *([_rel(session, file)] if reopen else [])]
     result = host.run(session.sync_references, roots, title="Syncing")
     others = [session.workspace.root / p for p in result.synced if path_key(p) != own]
-    _, pending = references.reload(others)
+    reloaded, pending = references.reload(others)
     reopened = reopen and any(path_key(p) == own for p in result.synced)
     if reopened:
         packages.reload(file, discard_edits=True)
     text = sync_summary(result, reopen and not reopened)
+    if reloaded or reopened:
+        text = f"{text}\n\n{RELOADED_TEXT}"
     if pending:
         text = f"{text}\n\n{_reopen_text([session.workspace.relative(p) for p in pending])}"
     host.message("Lore - Sync Dependencies", text)
 
 
+RELOADED_TEXT = (
+    "Designer reloaded the open packages that use the synced packages and closed their graph "
+    "views. Open the graphs again from the Explorer."
+)
+
+
 def _reopen_text(paths: list[Any]) -> str:
     return (
-        "Designer cannot reload these files while a package that uses them is open, or the "
-        f"package has unsaved changes. Close and reopen the package to see them:\n"
-        f"{list_paths([str(p) for p in paths])}"
+        "Designer could not reload these files, because they are not bitmaps or a package "
+        "that uses them has unsaved changes. Save, then close and reopen the package to see "
+        f"them:\n{list_paths([str(p) for p in paths])}"
     )
 
 

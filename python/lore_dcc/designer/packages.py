@@ -57,6 +57,20 @@ def find(path: Path | str) -> Any:
     return None
 
 
+def dependents(path: Path | str) -> list[str]:
+    """Return the files of the open user packages that depend on the package at `path`."""
+    wanted = key(path)
+    found: list[str] = []
+    for package in loaded():
+        file = file_of(package)
+        if file and any(
+            dep.getFilePath() and key(dep.getFilePath()) == wanted
+            for dep in package.getDependencies()
+        ):
+            found.append(file)
+    return found
+
+
 def is_modified(path: Path | str) -> bool:
     """Return True when the open package at `path` has unsaved changes."""
     package = find(path)

@@ -6,7 +6,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
-from fake_sd import EmbedMethod, FakePackage, SDResourceBitmap
+from fake_sd import EmbedMethod, FakeDependency, FakePackage, SDResourceBitmap
 from lore_dcc.designer import actions, hooks, host, plugin
 from lore_dcc.errors import NotAWorkingCopy
 from lore_dcc.locks import LockState
@@ -194,17 +194,19 @@ def test_explorer_lock_with_nothing_selected_locks_the_current_package(env) -> N
     assert env.session.calls == [("lock", [env.sbs])]
 
 
-def test_sync_reloads_open_packages_and_asks_to_reopen_for_bitmaps(env) -> None:
-    env.session.returns["behind"] = BehindReport(False, ("tex/albedo.png",))
-    env.session.returns["sync_references"] = SyncResult(("tex/albedo.png",), ())
+def test_sync_leaves_bitmaps_to_designer_and_reloads_packages_using_a_synced_one(env) -> None:
+    shared = Path(env.sbs).with_name("shared.sbs")
+    env.package.dependencies.append(FakeDependency(str(shared)))
+    env.session.returns["behind"] = BehindReport(False, ("tex/albedo.png", "shared.sbs"))
+    env.session.returns["sync_references"] = SyncResult(("tex/albedo.png", "shared.sbs"), ())
     env.answers.append("Sync")
     actions.sync_dependencies()
     assert [title for title, _ in env.asked] == [
         "Lore - Sync Dependencies?", "Lore - Sync Dependencies",
     ]  # fmt: skip
-    assert "tex/albedo.png" in env.messages[-1]
-    assert "reopen" in env.messages[-1]
-    assert env.app.events == []
+    assert actions.RELOADED_TEXT in env.messages[-1]
+    assert "could not reload" not in env.messages[-1]
+    assert env.app.events == [("unload", env.sbs), ("load", env.sbs)]
 
 
 def test_after_load_offer_syncs_the_loaded_package(env, monkeypatch) -> None:
@@ -287,3 +289,9 @@ def test_api_lock_and_stage_group_paths_by_working_copy_and_skip_the_rest(env, t
         ("finish_write", [Path(inside)]),
     ]
     assert api.lock([outside]) == ()
+
+
+def test_before_save_callback_uses_the_target_path_not_the_previous_one(env) -> None:
+    hooks.install()
+    env.app.callback("before_save")(env.sbs.encode(), b"D:/elsewhere/old.sbs")
+    assert env.session.calls == [("file_states", [env.sbs])]
