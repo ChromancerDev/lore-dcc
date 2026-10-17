@@ -2,9 +2,9 @@
 
 Lore version control inside DCC applications, in the spirit of SideFX Labs `P4Houdini`. Lock, stage, commit and push from inside the app, with Lore's own words and rules.
 
-**Status:** first release, 0.1.0, for Houdini 22. Blender 5.2 support is new. Tested on Windows. The code is portable, but Linux is untested.
+**Status:** first release, 0.1.0, for Houdini 22. Blender 5.2 and Substance 3D Designer 16 support is new. Tested on Windows. The code is portable, but Linux is untested.
 
-Found a bug? Use `Lore > File a Bug` in Houdini or Blender, or [open an issue](https://github.com/ChromancerDev/lore-dcc/issues/new?template=bug_report.yml).
+Found a bug? Use `Lore > File a Bug` in Houdini, Blender or Designer, or [open an issue](https://github.com/ChromancerDev/lore-dcc/issues/new?template=bug_report.yml).
 
 ## Disclaimer
 
@@ -14,7 +14,7 @@ Use this software at your own risk. The authors are not responsible for lost fil
 
 ## Requirements
 
-- Houdini 22, or Blender 5.2
+- Houdini 22, Blender 5.2, or Substance 3D Designer 16
 - Lore 0.9.0 or newer, with `lore` on `PATH`
 - A Lore working copy. The plugin finds it by walking up from the open file to `.lore/`. It reads the remote and identity from `.lore/config.toml` and needs no other setup.
 
@@ -24,6 +24,7 @@ Sign in with `lore login` in a terminal. The plugin never handles credentials.
 
 - Houdini: [docs/install/houdini.md](docs/install/houdini.md)
 - Blender: [docs/install/blender.md](docs/install/blender.md)
+- Substance 3D Designer: [docs/install/designer.md](docs/install/designer.md)
 - Hooking it into your own pipeline, scripts and launchers: [docs/integration.md](docs/integration.md)
 
 ## Using it
@@ -54,7 +55,15 @@ Sign in with `lore login` in a terminal. The plugin never handles credentials.
 
 ### Substance Designer
 
-Coming soon.
+Designer keeps many packages open. Every action works on the current package: the package of the graph in focus.
+
+| Where | Actions |
+|---|---|
+| `Lore` menu in the main menu bar | Info, Lock, Discard changes, Sync Dependencies, Commit, Enable/Disable, File a Bug |
+| Explorer toolbar | `Lore: Lock` and `Lore: Discard changes` on the selected packages and linked resources, such as a linked bitmap, or on the current package when nothing is selected. `Lore: Commit`. |
+| Saving | Before saving an unlocked tracked package: "Lore - Lock File?". After saving a new package: "Lore - Stage New File?". A package someone else locked: "Lore - File Locked by Another User", once per file. Turn the prompts off in `lore_dcc_prefs.json` in `Documents/Adobe/Adobe Substance 3D Designer`. |
+| After Commit | `Lore - Commit Complete` names the committed revision, the branch it was pushed to and the revision the server is at. |
+| Opening a package | Checks in the background whether any file the package reads is newer on the server, and offers `Sync Dependencies` when one is. |
 
 ### Substance Painter
 
@@ -65,6 +74,8 @@ Coming soon.
 Every file a scene reads, such as File SOP caches, Alembic and FBX files, textures, USD layers and the HDA libraries it uses, is a reference. When the plugin stages or commits a hip, it records the references inside the working copy as Lore dependency links tagged `houdini`, and removes links the scene no longer uses. New references show in the Commit dialog under `Dependencies` so they commit with the hip. References outside the working copy get a warning, since other users will not have them.
 
 In Blender the references are the files of linked libraries, images (every UDIM tile, and every frame of an image sequence on disk), sounds, movie clips, Alembic and USD cache files, fonts, volumes (every frame of a sequence) and external text files. Packed data and Blender's own bundled files are not references. The links are tagged `blender`, and a .blend counts as lockable. Blender's numbered backups, such as `shot.blend1`, never show in the Commit dialog.
+
+In Designer the references are the packages a package depends on and its linked resources: bitmaps, SVGs, fonts and meshes. Embedded resources and Designer's own library are not references. The links are tagged `designer`, and `.sbs` and `.sbsar` files count as lockable. Designer cannot reload a linked bitmap, font, SVG or mesh while the package is open, so after `Sync Dependencies` the summary lists them and asks you to reopen the package. Open packages that were synced reload on their own when they have no unsaved changes.
 
 `Sync Dependencies` updates only the references that are newer on the server and reloads them in Houdini. It never touches the open hip unless the hip is behind too and you pick `Sync and reopen`. Files with local changes are skipped and listed.
 

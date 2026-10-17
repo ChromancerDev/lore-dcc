@@ -58,8 +58,36 @@ jobs:
           name: blender
           path: lore-dcc-blender-*.zip
 
+  designer:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check the tag matches the package and plugin versions
+        run: |
+          version=$(sed -n 's/^__version__ = "\(.*\)"/\1/p' python/lore_dcc/__init__.py)
+          plugin=$(python3 -c 'import json; print(json.load(open("designer/pluginInfo.json"))["version"])')
+          test "v$version" = "$GITHUB_REF_NAME" || { echo "tag $GITHUB_REF_NAME != v$version"; exit 1; }
+          test "$plugin" = "$version" || { echo "pluginInfo $plugin != $version"; exit 1; }
+          echo "VERSION=$version" >> "$GITHUB_ENV"
+      - name: Build the Designer plugin zip
+        # Plugin Manager installs <name>.sdplugin as <name>/ in the user plugins folder; the core goes next to the shim.
+        run: |
+          stage=build/designer
+          plugin="$stage/plugin/lore_dcc_designer"
+          mkdir -p "$plugin"
+          cp designer/pluginInfo.json "$plugin/"
+          cp -r designer/lore_dcc_designer python/lore_dcc "$plugin/"
+          (cd "$stage/plugin" && zip -r "$GITHUB_WORKSPACE/$stage/lore_dcc_designer.sdplugin" lore_dcc_designer -x '*__pycache__*' '*.pyc')
+          cp LICENSE README.md "$stage/"
+          cp -r docs "$stage/"
+          (cd "$stage" && zip -r "$GITHUB_WORKSPACE/lore-dcc-designer-$VERSION.zip" lore_dcc_designer.sdplugin LICENSE README.md docs)
+      - uses: actions/upload-artifact@v4
+        with:
+          name: designer
+          path: lore-dcc-designer-*.zip
+
   publish:
-    needs: [houdini, blender]
+    needs: [houdini, blender, designer]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

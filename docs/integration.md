@@ -66,6 +66,24 @@ Paths may be absolute or start with `//`, relative to the open .blend. Paths out
 
 **Renders.** `lore.pre_render(scene)` locks the tracked frames and compositor File Output images a render of `scene` will write. `lore.post_render(scene)` stages the new ones and releases locks on the ones that came out byte-identical. Ticking `Lock and collect render outputs` in `Properties > Output > Lore` runs both from Blender's render handlers. A refused `pre_render()` raises, after a popup in the UI. Blender ignores errors raised in render handlers, so the toggle cannot stop an F12 or Ctrl+F12 render that has started: the popup shows (or the console prints it in `blender -b`) and the render goes on. When a refusal must stop the render, call `lore.pre_render()` in your render script before `bpy.ops.render.render()`.
 
+## Call it from scripts (Designer)
+
+`lore_dcc.designer.api` is the supported surface for scripts that run inside Designer. The plugin puts the `lore_dcc` core on Designer's Python path, so `import lore_dcc` works once the plugin is loaded.
+
+**Exports.** Designer has no export callback, so a script that publishes an .sbsar or saves output bitmaps wraps the write with `lock` and `stage`:
+
+```python
+import lore_dcc.designer.api as lore
+from sd.api.sbs.sdsbsarexporter import SDSBSARExporter
+
+target = "D:/projects/mygame/materials/rock.sbsar"
+lore.lock([target])    # raises if someone else holds a lock
+SDSBSARExporter.sNew().exportPackageToSBSAR(package, target)
+lore.stage([target])   # stages a new file, releases the lock on an unchanged one
+```
+
+Pass absolute paths. Paths outside every working copy are ignored. Both calls wait until Lore answers; Designer keeps drawing but takes no input meanwhile. A refusal shows a dialog and raises, so the script stops before it writes.
+
 ## Call the core from any Python
 
 Outside a DCC, for example in a publish script or a farm job, use the core directly. It needs Python 3.13 and `lore` on `PATH`.
@@ -83,7 +101,7 @@ session.prepare_write([path])        # locks it if tracked, raises if someone el
 result = session.finish_write([path])  # stages new files, releases unchanged locks
 ```
 
-`session_for` raises `NotAWorkingCopy` for a file outside a working copy and `LoreNotFound` when `lore` is not on `PATH`. Every failure the plugin raises is a subclass of `lore_dcc.errors.LoreError`. Modules under `lore_dcc.houdini` and `lore_dcc.ui` need Houdini, and `lore_dcc.blender` needs Blender. They are not for standalone use.
+`session_for` raises `NotAWorkingCopy` for a file outside a working copy and `LoreNotFound` when `lore` is not on `PATH`. Every failure the plugin raises is a subclass of `lore_dcc.errors.LoreError`. Modules under `lore_dcc.houdini` and `lore_dcc.ui` need Houdini, `lore_dcc.blender` needs Blender, and `lore_dcc.designer` needs Designer. They are not for standalone use.
 
 ## Per-project settings
 
@@ -91,7 +109,7 @@ Commit an optional `lore-dcc.json` at the root of the working copy to change whi
 
 ## Per-user settings
 
-`lore_dcc_prefs.json` in the Houdini user folder, or in Blender's config folder, holds each artist's toggles. A studio can pre-seed it:
+`lore_dcc_prefs.json` in the Houdini user folder, in Blender's config folder, or in `Documents/Adobe/Adobe Substance 3D Designer`, holds each artist's toggles. A studio can pre-seed it:
 
 ```json
 {
