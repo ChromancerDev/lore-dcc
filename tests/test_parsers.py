@@ -152,6 +152,17 @@ def test_auth_info() -> None:
     assert info == parsers.AuthInfo("user:0000-1111", "artist@example.com")
 
 
+def test_auth_info_lore_0_13() -> None:
+    text = (
+        "ID: user:00000000-1111-2222-3333-444444444444\n"
+        "Name: Art\n"
+        "Username: artist@example.com\n"
+        "Expires: Mon, 15 Feb 2027 21:26:11 +0000\n"
+    )
+    info = parsers.parse_auth_info(text)
+    assert info == parsers.AuthInfo("user:00000000-1111-2222-3333-444444444444", "Art")
+
+
 def test_auth_info_fails_closed() -> None:
     with pytest.raises(LoreOutputError):
         parsers.parse_auth_info("Not logged in\n")

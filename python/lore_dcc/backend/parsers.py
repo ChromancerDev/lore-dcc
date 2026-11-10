@@ -309,14 +309,17 @@ def parse_status(text: str) -> Status:
 
 
 def parse_auth_info(text: str) -> AuthInfo:
-    """Parse `lore auth info` output: `ID:` and `Name:` lines."""
+    """Parse `lore auth info` output: `ID:` and `Name:` lines.
+
+    Lore 0.13 adds `Username:` and `Expires:` lines; they are accepted and ignored.
+    """
     fields: dict[str, str] = {}
     for line in text.splitlines():
         stripped = line.strip()
         if not stripped:
             continue
         key, sep, value = stripped.partition(":")
-        if not sep or key not in ("ID", "Name"):
+        if not sep or key not in ("ID", "Name", "Username", "Expires"):
             raise LoreOutputError(f"Unrecognised lore auth info line: {line!r}", text)
         fields[key] = value.strip()
     if "ID" not in fields or "Name" not in fields:
