@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Usage: publish-release-branches.sh <version> <dist dir>
 # For each <dist>/lore-dcc-<dcc>-<version>.zip, commits the zip's contents plus a VERSION file
-# onto release/<dcc> in origin. A rerun for the same version adds nothing.
+# onto release/<dcc> in origin. A .sdplugin in the zip goes in unpacked, since Designer loads
+# a plugin path only as folders. A rerun for the same version adds nothing.
 set -euo pipefail
 version=$1
 dist=$2
@@ -18,6 +19,10 @@ for zip in "${zips[@]}"; do
   branch=release/$dcc
   stage=$(mktemp -d)
   unzip -q "$zip" -d "$stage"
+  for plugin in "$stage"/*.sdplugin; do
+    unzip -q "$plugin" -d "$stage"
+    rm "$plugin"
+  done
   printf '%s\n' "$version" > "$stage/VERSION"
 
   index=$(mktemp -u)
