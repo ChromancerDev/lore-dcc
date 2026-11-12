@@ -8,13 +8,13 @@ body:
     attributes:
       value: |
         Thanks for taking the time to fill out this bug report!
-        `Lore > File a Bug` in Houdini or Blender fills in the DCC, versions, OS and the last Lore error for you, with server addresses, emails and IDs masked. Check it before you submit.
+        `Lore > File a Bug` in Houdini, Blender or Designer fills in the DCC, versions, OS and the last Lore error for you, with server addresses, emails and IDs masked. Check it before you submit.
         This repository is public: leave out server addresses, user names and anything private.
   - type: input
     id: dcc
     attributes:
       label: DCC
-      description: Houdini or Blender.
+      description: Houdini, Blender or Designer.
       placeholder: Houdini
     validations:
       required: true

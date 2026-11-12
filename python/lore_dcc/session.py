@@ -748,6 +748,7 @@ class DccProfile:
 
 HOUDINI = DccProfile("houdini", "houdini")
 BLENDER = DccProfile("blender", "blender", (".blend",))
+DESIGNER = DccProfile("designer", "designer", (".sbs", ".sbsar"))
 
 _SESSIONS: dict[tuple[Path, str], Session] = {}
 _SESSIONS_LOCK = threading.Lock()
